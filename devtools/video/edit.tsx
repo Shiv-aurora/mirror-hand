@@ -1,6 +1,6 @@
 /**
  * Mirror Hand: demo video for the Meta VR Start Developer Competition 2026.
- * Third cut. 1920x1080, 30 fps. Lengths come from the BEATS list below.
+ * Third cut, with narration. 1920x1080, 30 fps. Lengths come from the BEATS list below.
  *
  * Every moving picture is the app's own footage, recorded in the Immersive
  * Web SDK emulator at 2304x1296 (devtools/record.mjs, scenes "one", "two",
@@ -13,7 +13,8 @@
  *
  * Rendered with raea 0.1.6 (github.com/shinyobjectz/raea) from a folder that
  * holds this file and media/ (v3/one.mp4, v3/two.mp4, v3/explain.mp4,
- * v3/closing.mp4, glasses.mp4, fonts/Inter.ttf):
+ * v3/closing-long.mp4, glasses.mp4, fonts/Inter.ttf, and the narration as one
+ * file per line in vo/01.wav to vo/18.wav):
  *   raea render edit.tsx -o demo.mp4 --quality master
  */
 import {
@@ -52,13 +53,16 @@ const sec = (s: number) => Math.round(s * FPS);
 const ramp = (f: number, from: number, to: number, easing = OUT) =>
   interpolate(f, [sec(from), sec(to)], [0, 1], { ...clamp, easing });
 /** The recordings are quiet; this lifts all of them by the same amount, with the loudest bell still under the ceiling. */
-const GAIN = 9;
+const GAIN = 4;
+/** Seconds each narration clip runs (media/vo/durations.json). */
+const VO: Record<string, number> = {"01": 1.74, "02": 1.94, "03": 3.4, "04": 5.54, "05": 6.24, "06": 2.28, "07": 2.89, "08": 4.68, "09": 2.99, "10": 4.69, "11": 1.39, "12": 1.9, "13": 4.86, "14": 3.75, "15": 6.23, "16": 5.28, "17": 4.14, "18": 5.14};
+const VOICE_GAIN = 0;
 
 // ---- data -------------------------------------------------------------------
 const ONE = staticFile("v3/one.mp4");
 const TWO = staticFile("v3/two.mp4");
 const EXPLAIN = staticFile("v3/explain.mp4");
-const CLOSING = staticFile("v3/closing.mp4");
+const CLOSING = staticFile("v3/closing-long.mp4");
 const GLASSES = staticFile("glasses.mp4");
 
 /** A window onto the 2304x1296 recording: its top-left corner in recording pixels, and the zoom (1 is pixel for pixel). */
@@ -212,7 +216,7 @@ function MirrorBox({ mirrorAt, reflectAt }: { mirrorAt: number; reflectAt: numbe
     <AbsoluteFill style={{ opacity: arrive }}>
       {/* the space inside the mirror */}
       <div style={{ position: "absolute", left: MX - 420, top: TOP, width: 420, height: TALL * mirror, opacity: mirror, background: `linear-gradient(90deg, rgba(${GOLD},0) 0%, rgba(${GOLD},0.11) 100%)` }} />
-      <HandIcon x={LX} y={BASE} flip open={weak} rgb={CREAM} opacity={0.5 * (1 - 0.8 * hidden)} />
+      <HandIcon x={LX} y={BASE} flip open={weak} rgb={CREAM} opacity={0.5 * (1 - 0.8 * hidden) * (1 - reflect)} />
       <HandIcon x={LX} y={BASE} flip open={strong} rgb={GOLD} opacity={reflect} />
       <HandIcon x={RX} y={BASE} open={strong} rgb={CREAM} />
       {/* the mirror, seen edge on from above */}
@@ -231,12 +235,12 @@ function Why() {
   const lines: Line[] = [
     { text: "After a stroke, one hand often moves far less than the other.", at: 0.3, until: 4.1 },
     { text: "Mirror therapy hides that hand behind a mirror.", at: 4.3 },
-    { text: "The stronger hand's reflection appears in its place.", at: 6.1 },
-    { text: "Thieme et al., Cochrane Review, 2018: 62 trials, moderate-quality evidence that it improves movement after stroke.", at: 8.1, kind: "note" },
+    { text: "The stronger hand's reflection appears in its place.", at: 7.4 },
+    { text: "Thieme et al., Cochrane Review, 2018: 62 trials, moderate-quality evidence that it improves movement after stroke.", at: 10.3, kind: "note" },
   ];
   return (
     <AbsoluteFill style={{ backgroundColor: NIGHT }}>
-      <MirrorBox mirrorAt={4.3} reflectAt={6.1} />
+      <MirrorBox mirrorAt={4.3} reflectAt={7.4} />
       <div style={{ position: "absolute", left: 110, top: 250, width: 690, display: "flex", flexDirection: "column" }}>
         {lines.map((l, i) => <Words key={i} line={l} size={60} />)}
       </div>
@@ -338,11 +342,12 @@ function Tag({ text, x, y, at }: { text: string; x: number; y: number; at: numbe
 
 // ---- the cut ----------------------------------------------------------------
 
-interface Beat { id: string; dur: number; node: (dur: number) => any }
+/** `say` lists the narration lines spoken over the beat: [clip, seconds into the beat]. */
+interface Beat { id: string; dur: number; say?: [string, number][]; node: (dur: number) => any }
 
 const BEATS: Beat[] = [
   // Proof first: two hands moving together, then a look down at where the left hand really is.
-  { id: "hook", dur: 8.0, node: (d) => (
+  { id: "hook", dur: 8.0, say: [["01", 0.5], ["02", 4.5]], node: (d) => (
     <>
       <Shot src={ONE} from={6.55} dur={d} />
       <Column shade={0.55} lines={[
@@ -353,19 +358,19 @@ const BEATS: Beat[] = [
       <Tag text="the real left hand, resting in the lap" x={150} y={560} at={5.3} />
     </>
   ) },
-  { id: "why", dur: 13.2, node: () => <Why /> },
-  { id: "title", dur: 3.0, node: () => <Title /> },
+  { id: "why", dur: 17.2, say: [["03", 0.4], ["04", 4.4], ["05", 10.4]], node: () => <Why /> },
+  { id: "title", dur: 3.2, say: [["06", 0.35]], node: () => <Title /> },
 
   // One session, in order.
-  { id: "choose", dur: 3.5, node: (d) => (
+  { id: "choose", dur: 3.7, say: [["07", 0.3]], node: (d) => (
     <>
       {/* The welcome tone at the start of the recording is its loudest sound; this shot gets less lift. */}
-      <Shot src={ONE} from={2.1} dur={d} gainDb={GAIN - 4} />
+      <Shot src={ONE} from={1.9} dur={d} gainDb={GAIN - 4} />
       <Column lines={[{ text: "First, hold up the hand that moves more easily.", at: 0.3 }]} />
       <Rail step={1} dur={d} />
     </>
   ) },
-  { id: "open-close", dur: 7.4, node: (d) => (
+  { id: "open-close", dur: 7.4, say: [["08", 0.4]], node: (d) => (
     <>
       <Shot src={ONE} from={21.0} dur={d} />
       <Column lines={[
@@ -375,7 +380,7 @@ const BEATS: Beat[] = [
       <Rail step={2} dur={d} />
     </>
   ) },
-  { id: "touches", dur: 7.4, node: (d) => (
+  { id: "touches", dur: 7.4, say: [["09", 0.4]], node: (d) => (
     <>
       <Shot src={ONE} from={43.5} dur={d} win={{ x: 0, y: 0, zoom: 1 }} />
       <Column lines={[
@@ -385,7 +390,7 @@ const BEATS: Beat[] = [
       <Rail step={3} dur={d} />
     </>
   ) },
-  { id: "reach", dur: 7.6, node: (d) => (
+  { id: "reach", dur: 7.6, say: [["10", 0.4]], node: (d) => (
     <>
       <Shot src={TWO} from={0.5} dur={d} />
       <Column lines={[
@@ -395,7 +400,7 @@ const BEATS: Beat[] = [
       <Rail step={4} dur={d} />
     </>
   ) },
-  { id: "your-turn", dur: 9.6, node: (d) => (
+  { id: "your-turn", dur: 9.6, say: [["11", 0.4], ["12", 3.9]], node: (d) => (
     <>
       <Shot src={TWO} from={13.4} dur={d} />
       <Column lines={[
@@ -406,7 +411,7 @@ const BEATS: Beat[] = [
       <Rail step={5} dur={d} />
     </>
   ) },
-  { id: "summary", dur: 6.8, node: (d) => (
+  { id: "summary", dur: 6.8, say: [["13", 0.4]], node: (d) => (
     <>
       <Shot src={TWO} from={34.2} dur={d} win={{ x: 0, y: 150, zoom: 1 }} />
       <Column lines={[
@@ -418,7 +423,7 @@ const BEATS: Beat[] = [
   ) },
 
   // How it works: seen as the person sees it, then from the side.
-  { id: "how", dur: 13.6, node: (d) => (
+  { id: "how", dur: 13.6, say: [["14", 0.5], ["15", 5.3]], node: (d) => (
     <>
       <Shot src={EXPLAIN} from={0.7} dur={d} to={{ x: 0, y: 50, zoom: 0.9 }} moveAt={3.65} moveFor={3.2} />
       <Column lines={[
@@ -430,7 +435,7 @@ const BEATS: Beat[] = [
   ) },
 
   // The narrower device.
-  { id: "glasses", dur: 8.2, node: (d) => (
+  { id: "glasses", dur: 8.2, say: [["16", 0.4]], node: (d) => (
     <>
       <GlassesView from={2.3} dur={d} />
       <Column top={300} shade={0} lines={[
@@ -439,13 +444,13 @@ const BEATS: Beat[] = [
       ]} />
     </>
   ) },
-  { id: "end", dur: 8.8, node: (d) => <End dur={d} /> },
+  { id: "end", dur: 11.0, say: [["17", 0.6], ["18", 5.2]], node: (d) => <End dur={d} /> },
 ];
 
 const STARTS = BEATS.reduce<number[]>((acc, b, i) => [...acc, i === 0 ? 0 : acc[i - 1] + sec(BEATS[i - 1].dur)], []);
 const TOTAL = STARTS[STARTS.length - 1] + sec(BEATS[BEATS.length - 1].dur);
 const startOf = (id: string) => STARTS[BEATS.findIndex((b) => b.id === id)];
-const WHY_AND_TITLE = 13.2 + 3.0;
+const WHY_AND_TITLE = 17.2 + 3.2;
 
 export default function Demo() {
   return (
@@ -456,12 +461,19 @@ export default function Demo() {
           {b.node(sec(b.dur))}
         </Sequence>
       ))}
+      {/* The narration: one clip per line, each starting on its own beat. */}
+      {BEATS.flatMap((b, i) => (b.say ?? []).map(([clip, at]) => (
+        <Sequence key={clip} from={STARTS[i] + sec(at)} durationInFrames={Math.floor(VO[clip] * FPS)} layout="none" name={`voice ${clip}`}>
+          <Audio src={staticFile(`vo/${clip}.wav`)} startFrom={0} endAt={Math.floor(VO[clip] * FPS)} gainDb={VOICE_GAIN} fadeIn={0.01} fadeOut={0.03} />
+        </Sequence>
+      )))}
       {/* The app's own sound carries on under the pages that have no footage. */}
       <Sequence from={startOf("why")} durationInFrames={sec(WHY_AND_TITLE)} layout="none" name="sound under the why page">
-        <Audio src={ONE} startFrom={sec(20.4)} endAt={sec(20.4 + WHY_AND_TITLE)} gainDb={GAIN - 5} fadeIn={0.05} fadeOut={0.3} />
+        <Audio src={ONE} startFrom={sec(20.4)} endAt={sec(20.4 + WHY_AND_TITLE)} gainDb={GAIN - 4} fadeIn={0.05} fadeOut={0.3} />
       </Sequence>
-      <Sequence from={startOf("end")} durationInFrames={sec(6.4)} layout="none" name="sound under the end page">
-        <Audio src={TWO} startFrom={sec(42.5)} endAt={sec(48.9)} gainDb={GAIN} fadeIn={0.05} fadeOut={1.2} />
+      {/* The landing page is silent in the app, so the end page borrows the garden's sound from the first exercise. */}
+      <Sequence from={startOf("end")} durationInFrames={sec(11.0)} layout="none" name="sound under the end page">
+        <Audio src={ONE} startFrom={sec(22.0)} endAt={sec(33.0)} gainDb={GAIN - 5} fadeIn={0.3} fadeOut={1.5} />
       </Sequence>
     </AbsoluteFill>
   );
