@@ -50,3 +50,6 @@ pids/
 .codex/
 .cursor/
 .github/instructions/
+
+# Submission materials and raw footage (large files; kept locally)
+submission/

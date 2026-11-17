@@ -8,6 +8,10 @@ today.
 
 Hands only. Seated. No controllers, no account, nothing uploaded.
 
+**Try it in Quest Browser:** https://shiv-aurora.github.io/mirror-hand/
+
+![Two hands opening over two water lilies; the left one is the reflection](docs/open-close.jpg)
+
 **Not a medical device.** Mirror Hand has not been tested with patients and is
 not a substitute for care from a clinician. The number it shows is an estimate
 from headset hand tracking, not a clinical measurement.
