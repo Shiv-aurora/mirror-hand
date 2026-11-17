@@ -22,7 +22,14 @@ export default async function run({ frame, page, workspaceRoot }) {
   );
   mkdirSync(dirname(outFile), { recursive: true });
 
-  await page.setViewportSize({ width: 1920, height: 1080 });
+  // MH_W x MH_H is the picture size; a larger one leaves room to punch in.
+  const width = Number(process.env.MH_W ?? 1920);
+  const height = Number(process.env.MH_H ?? 1080);
+  const options = {
+    fps: Number(process.env.MH_FPS ?? 60),
+    bitrate: Number(process.env.MH_BITRATE ?? 16_000_000),
+  };
+  await page.setViewportSize({ width, height });
   await page.evaluate(() => {
     for (const el of document.querySelectorAll('iframe')) {
       el.setAttribute(
@@ -34,7 +41,7 @@ export default async function run({ frame, page, workspaceRoot }) {
   const target = frame ?? page;
   await new Promise((r) => setTimeout(r, 1200));
 
-  const result = await target.evaluate(async (steps) => {
+  const result = await target.evaluate(async ([steps, options]) => {
     const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     const remote = window.IWER_MCP.device.remote;
     const api = () => globalThis.__mirrorHand;
@@ -53,7 +60,7 @@ export default async function run({ frame, page, workspaceRoot }) {
           canvases.map((c) => `${c.width}x${c.height}`).join(',') +
           ' using ' + canvas.width + 'x' + canvas.height,
       );
-      const stream = canvas.captureStream(60);
+      const stream = canvas.captureStream(options.fps);
       const out = api()?.sound?.output;
       if (out) {
         const dest = out.context.createMediaStreamDestination();
@@ -72,7 +79,7 @@ export default async function run({ frame, page, workspaceRoot }) {
       ].find((m) => MediaRecorder.isTypeSupported(m));
       recorder = new MediaRecorder(stream, {
         mimeType: mime,
-        videoBitsPerSecond: 16_000_000,
+        videoBitsPerSecond: options.bitrate,
         audioBitsPerSecond: 160_000,
       });
       recorder.ondataavailable = (event) => {
@@ -83,6 +90,84 @@ export default async function run({ frame, page, workspaceRoot }) {
       recorder.start(1000);
       startedAt = performance.now();
       log.push('recording ' + mime);
+    };
+
+    // The camera: the emulated headset, moved along a path of our own so a
+    // move can ease, orbit a point and change the lens at the same time.
+    const device = window.IWER_MCP.device;
+    const cam = { p: [0, 1.18, 0], look: [0, 0.84, -1], fov: device.fovy, token: 0 };
+    const EASE = {
+      linear: (u) => u,
+      inout: (u) => u * u * u * (u * (6 * u - 15) + 10),
+      out: (u) => 1 - (1 - u) ** 3,
+      in: (u) => u ** 3,
+    };
+    const aim = (p, look, fov) => {
+      const norm = (v) => {
+        const l = Math.hypot(v[0], v[1], v[2]) || 1;
+        return [v[0] / l, v[1] / l, v[2] / l];
+      };
+      const cross = (a, b) => [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+      ];
+      const z = norm([p[0] - look[0], p[1] - look[1], p[2] - look[2]]);
+      const x = norm(cross([0, 1, 0], z));
+      const y = cross(z, x);
+      const [m00, m10, m20] = x;
+      const [m01, m11, m21] = y;
+      const [m02, m12, m22] = z;
+      const trace = m00 + m11 + m22;
+      let q;
+      if (trace > 0) {
+        const k = 0.5 / Math.sqrt(trace + 1);
+        q = [(m21 - m12) * k, (m02 - m20) * k, (m10 - m01) * k, 0.25 / k];
+      } else if (m00 > m11 && m00 > m22) {
+        const k = 2 * Math.sqrt(1 + m00 - m11 - m22);
+        q = [0.25 * k, (m01 + m10) / k, (m02 + m20) / k, (m21 - m12) / k];
+      } else if (m11 > m22) {
+        const k = 2 * Math.sqrt(1 + m11 - m00 - m22);
+        q = [(m01 + m10) / k, 0.25 * k, (m12 + m21) / k, (m02 - m20) / k];
+      } else {
+        const k = 2 * Math.sqrt(1 + m22 - m00 - m11);
+        q = [(m02 + m20) / k, (m12 + m21) / k, 0.25 * k, (m10 - m01) / k];
+      }
+      device.position.set(p[0], p[1], p[2]);
+      device.quaternion.set(q[0], q[1], q[2], q[3]);
+      device.fovy = fov;
+    };
+    /** Move the camera to { p, look, fov } over `dur` seconds, circling `look`. */
+    const moveCam = (to) => {
+      const token = ++cam.token;
+      const from = { p: cam.p.slice(), look: cam.look.slice(), fov: cam.fov };
+      const goal = { p: to.p ?? from.p, look: to.look ?? from.look, fov: to.fov ?? from.fov };
+      const polar = (state) => {
+        const o = state.p.map((v, i) => v - state.look[i]);
+        return { r: Math.hypot(o[0], o[2]), az: Math.atan2(o[0], o[2]), h: o[1] };
+      };
+      const a = polar(from);
+      const b = polar(goal);
+      let turn = b.az - a.az;
+      while (turn > Math.PI) turn -= 2 * Math.PI;
+      while (turn < -Math.PI) turn += 2 * Math.PI;
+      const ms = (to.dur ?? 0) * 1000;
+      const ease = EASE[to.ease ?? 'inout'];
+      const t0 = performance.now();
+      const step = () => {
+        if (cam.token !== token) return;
+        const u = ms <= 0 ? 1 : Math.min(1, (performance.now() - t0) / ms);
+        const k = ease(u);
+        const look = from.look.map((v, i) => v + (goal.look[i] - v) * k);
+        const r = a.r + (b.r - a.r) * k;
+        const az = a.az + turn * k;
+        cam.p = [look[0] + r * Math.sin(az), look[1] + a.h + (b.h - a.h) * k, look[2] + r * Math.cos(az)];
+        cam.look = look;
+        cam.fov = from.fov + (goal.fov - from.fov) * k;
+        aim(cam.p, cam.look, cam.fov);
+        if (u < 1) requestAnimationFrame(step);
+      };
+      step();
     };
 
     for (const step of steps) {
@@ -96,6 +181,8 @@ export default async function run({ frame, page, workspaceRoot }) {
           if (pending && typeof pending.catch === 'function') {
             pending.catch((error) => log.push(`xr ${a} failed: ${error}`));
           }
+        } else if (op === 'cam') {
+          moveCam(a);
         } else if (op === 'hook') {
           api()?.[a]?.(b);
         } else if (op === 'eval') {
@@ -137,7 +224,7 @@ export default async function run({ frame, page, workspaceRoot }) {
       size: globalThis.__recBlob?.size ?? 0,
       state: api()?.state(),
     };
-  }, steps);
+  }, [steps, options]);
 
   // Pull the recording out of the page in pieces.
   writeFileSync(outFile, Buffer.alloc(0));

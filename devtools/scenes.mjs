@@ -143,70 +143,159 @@ const seed = (weight) => [
   wait(1500),
 ];
 
+// ---- camera and variation -----------------------------------------------------
+const EYE = [0, 1.18, 0];
+const RAD = Math.PI / 180;
+/** A camera at `p` looking `pitch` degrees up (negative is down) and `yaw` to the left. */
+const view = (p, pitch, yaw = 0) => ({
+  p,
+  look: [
+    p[0] - Math.sin(yaw * RAD) * Math.cos(pitch * RAD),
+    p[1] + Math.sin(pitch * RAD),
+    p[2] - Math.cos(yaw * RAD) * Math.cos(pitch * RAD),
+  ],
+});
+/** ['cam', { p, look, fov, dur, ease }]: see moveCam in record.mjs. */
+const cam = (to) => ['cam', to];
+/** The same "random" number every run, so a take can be repeated. */
+const rnd = (i) => {
+  const x = Math.sin(i * 12.9898 + 4.1) * 43758.5453;
+  return x - Math.floor(x);
+};
+const between = (i, low, high) => low + (high - low) * rnd(i);
+const round3 = (x) => Math.round(x * 1000) / 1000;
+/** WORK, nudged a little differently each time, so the hand never sits dead still. */
+const near = (i, spread = 0.012) => [
+  round3(WORK[0] + (rnd(i) - 0.5) * 2 * spread),
+  round3(WORK[1] + (rnd(i + 31) - 0.5) * 2 * spread),
+  round3(WORK[2] + (rnd(i + 57) - 0.5) * 2 * spread),
+];
+
 export const SCENES = {
   seed1: seed(0.2),
   seed2: seed(0.36),
+
+  // How it works: the tracked joints, the mirror plane, and the reflection,
+  // seen first as the person sees it and then from the side.
+  explain: [
+    ...sitDown,
+    cam({ ...view(EYE, -20), fov: 1.0 }),
+    wait(400),
+    ...chooseRight,
+    hand('right', ...WORK, 0.7),
+    wait(1100),
+    ['record'],
+    mark('start'),
+    wait(1300),
+    ['hook', 'explain', 1],
+    mark('joints'),
+    wait(900),
+    pose('right', 'fist', 0.9),
+    wait(1150),
+    pose('right', 'open', 0.9),
+    wait(1000),
+    mark('orbit'),
+    cam({ p: [0.26, 1.3, 0.02], look: [-0.1, 0.94, -0.42], fov: 0.8, dur: 3.2 }),
+    wait(1000),
+    ['hook', 'explain', 2],
+    mark('plane'),
+    wait(2500),
+    ['hook', 'explain', 3],
+    mark('reflect'),
+    cam({ p: [0.31, 1.23, -0.07], look: [-0.1, 0.94, -0.42], fov: 0.8, dur: 11, ease: 'linear' }),
+    wait(1500),
+    pose('right', 'fist', 0.9),
+    wait(1250),
+    pose('right', 'open', 0.9),
+    wait(1000),
+    hand('right', 0.2, 1.0, -0.44, 1.0),
+    wait(1200),
+    pose('right', 'pinch', 0.5),
+    wait(900),
+    pose('right', 'open', 0.5),
+    wait(700),
+    hand('right', ...WORK, 1.0),
+    wait(1500),
+    mark('end'),
+  ],
 
   // Part one: sit down, choose a hand, meet the mirror, open-and-close,
   // finger touches.
   one: [
     ...sitDown,
-    // A tighter lens than the emulator's default, so the hands fill the frame.
-    ['eval', 'IWER_MCP.device.fovy = 1.0'],
-    head(-7, 6, 0.3),
+    cam({ ...view(EYE, -7, 6), fov: 1.0 }),
     wait(900),
     ['record'],
     mark('choose'),
-    wait(2600),
-    head(-20, 0, 1.6),
-    wait(1600),
+    wait(2200),
+    cam({ ...view(EYE, -20), dur: 1.8 }),
+    wait(1700),
     hand('right', 0.03, 0.93, -0.36, 1.0),
     until('(s) => s.phase === "meet"', 8000),
     mark('mirror'),
-    hand('right', ...WORK, 0.8),
-    wait(1500),
-    // Show that the reflection follows: lift, turn, close, open.
-    hand('right', 0.2, 1.0, -0.44, 0.9),
-    wait(1000),
-    pose('right', 'fist', 0.6),
-    wait(800),
+    hand('right', ...WORK, 0.9),
+    // A slow push in while the reflection is shown to follow.
+    cam({ ...view([0, 1.17, -0.05], -20), dur: 9, ease: 'linear' }),
+    wait(1300),
+    hand('right', 0.2, 1.0, -0.44, 1.0),
+    wait(1050),
+    pose('right', 'fist', 0.7),
+    wait(900),
     pose('right', 'open', 0.6),
-    wait(700),
-    hand('right', ...WORK, 0.8),
-    wait(1000),
-    // Reveal where the left hand really is.
+    wait(650),
+    // Stay clear of the middle: a thumb within 2 cm of it starts the session.
+    hand('right', 0.165, 0.95, -0.4, 0.9),
+    wait(1100),
+    // Look down: where the left hand really is.
     ['hook', 'reveal'],
     mark('reveal'),
-    wait(900),
+    cam({ ...view([0, 1.17, -0.05], -35), dur: 1.3 }),
+    wait(1700),
     pose('right', 'peace', 0.5),
-    wait(1100),
+    wait(1000),
     pose('right', 'open', 0.5),
-    wait(900),
-    hand('right', 0.2, 0.98, -0.42, 0.8),
-    wait(900),
-    hand('right', ...WORK, 0.8),
-    wait(1200),
+    wait(700),
+    hand('right', 0.21, 0.99, -0.42, 0.9),
+    wait(850),
+    pose('right', 'fist', 0.6),
+    wait(750),
+    pose('right', 'open', 0.6),
+    wait(650),
+    hand('right', ...WORK, 0.9),
+    wait(700),
+    mark('lookup'),
+    cam({ ...view(EYE, -20), dur: 1.2 }),
+    wait(1300),
+    ['hook', 'reveal', 'off'],
+    wait(600),
     mark('touch'),
     hand('right', 0.04, 0.93, -0.38, 0.9),
     until('(s) => s.activity === 0', 8000),
     mark('bloom'),
     hand('right', ...WORK, 0.8),
+    cam({ ...view([0, 1.165, -0.07], -20), dur: 17, ease: 'linear' }),
     wait(1400),
-    ...repeat(6, () => [
-      pose('right', 'fist', 0.9),
-      wait(1250),
-      pose('right', 'open', 0.9),
-      wait(1250),
-    ]),
+    ...repeat(6, (i) => {
+      const close = between(i, 0.8, 1.05);
+      const open = between(i + 11, 0.8, 1.0);
+      return [
+        hand('right', ...near(i), 1.4),
+        pose('right', 'fist', round3(close)),
+        wait(Math.round(close * 1000 + between(i + 5, 250, 520))),
+        pose('right', 'open', round3(open)),
+        wait(Math.round(open * 1000 + between(i + 7, 250, 480))),
+      ];
+    }),
     until('(s) => s.activity === 1', 6000),
     mark('chimes'),
-    ['hook', 'reveal', 'off'],
-    wait(1600),
+    // Closer, for the fingers.
+    cam({ ...view([0, 1.13, -0.1], -27), fov: 0.86, dur: 1.6 }),
+    wait(1700),
     ...repeat(CHIME_ORDER.length, (i) => [
-      pose('right', PINCHES[CHIME_ORDER[i]], 0.3),
-      wait(680),
-      pose('right', 'open', 0.3),
-      wait(560),
+      pose('right', PINCHES[CHIME_ORDER[i]], round3(between(i + 20, 0.27, 0.36))),
+      wait(Math.round(between(i + 40, 620, 760))),
+      pose('right', 'open', round3(between(i + 60, 0.27, 0.34))),
+      wait(Math.round(between(i + 80, 480, 640))),
     ]),
     until('(s) => s.activity === 2', 6000),
     mark('fireflies'),
@@ -216,36 +305,51 @@ export const SCENES = {
   // Part two: reach, your turn, summary, back to the landing page.
   two: [
     ['unlock'],
+    cam({ ...view(EYE, -19), fov: 1.0 }),
+    wait(500),
     ['record'],
     mark('fireflies'),
+    // Ease back a little as the hands reach out.
+    cam({ ...view([0, 1.19, 0.04], -19), dur: 9, ease: 'linear' }),
     wait(900),
     ...repeat(REACHES.length, (i) => [
-      hand('right', ...reachWrist(i), 0.8),
+      hand('right', ...reachWrist(i), round3(between(i + 100, 0.7, 0.95))),
       until(`(s) => s.progress >= ${(i + 1) / REACHES.length - 0.01} || s.activity !== 2`, 5000),
-      wait(250),
+      wait(Math.round(between(i + 120, 200, 380))),
     ]),
     until('(s) => s.activity === 3', 8000),
     mark('turn'),
     hand('right', ...LAP.right, 0.9),
+    cam({ ...view(EYE, -21), dur: 1.4 }),
     wait(1100),
     hand('left', -0.15, 0.93, -0.38, 1.0),
     wait(2400),
-    ...repeat(6, () => [
-      partFist('left', 0.45, 1.0),
-      wait(1450),
-      pose('left', 'default', 1.0),
-      wait(1450),
-    ]),
+    cam({ ...view([-0.02, 1.165, -0.06], -21), dur: 15, ease: 'linear' }),
+    ...repeat(6, (i) => {
+      const close = between(i + 140, 0.95, 1.25);
+      const open = between(i + 150, 0.9, 1.15);
+      return [
+        partFist('left', round3(between(i + 160, 0.38, 0.5)), round3(close)),
+        wait(Math.round(close * 1000 + between(i + 170, 300, 560))),
+        pose('left', 'default', round3(open)),
+        wait(Math.round(open * 1000 + between(i + 180, 300, 520))),
+      ];
+    }),
     until('(s) => s.phase === "summary"', 12000),
     mark('summary'),
-    head(-13, 0, 1.2),
+    cam({ ...view(EYE, -12), dur: 1.3 }),
     hand('left', ...LAP.left, 0.9),
-    wait(6500),
+    wait(1800),
+    // Lean in towards the result.
+    cam({ ...view([0, 1.17, -0.22], -11), dur: 5.5, ease: 'out' }),
+    wait(5600),
     mark('finish'),
-    head(-20, 0, 0.8),
-    wait(900),
+    cam({ ...view(EYE, -20), dur: 1.1 }),
+    wait(1200),
     ['hook', 'press', 'finish'],
-    wait(4500),
+    mark('landing'),
+    cam({ ...view([0, 1.2, 0.02], -15), dur: 7, ease: 'linear' }),
+    wait(7000),
     mark('end'),
   ],
 

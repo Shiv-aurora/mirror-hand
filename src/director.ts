@@ -25,6 +25,7 @@ import {
 } from './activities.js';
 import { PENTATONIC, sound } from './audio.js';
 import { Pad } from './components.js';
+import { ExplainOverlay } from './explain.js';
 import { Garden, getGlowTexture } from './garden.js';
 import { HandState, otherSide, type Side } from './hand-tracking.js';
 import { HandVisual } from './hand-visual.js';
@@ -65,6 +66,8 @@ export class Director extends createSystem({
   /** Demo only: faint outlines of where the hands really are. */
   private ghosts!: Record<Side, HandVisual>;
   private reveal = false;
+  /** Demo view: the joints, the mirror plane and the reflection. */
+  private readonly explain = new ExplainOverlay();
   private seam!: Mesh;
   private seamLevel = 0;
   private pads!: Record<string, PadButton>;
@@ -158,6 +161,7 @@ export class Director extends createSystem({
     this.seam.rotation.x = -Math.PI / 2;
     this.seam.visible = false;
     this.stage.add(this.seam);
+    this.stage.add(this.explain.group);
 
     this.bloom = new BloomActivity();
     this.turn = new TurnActivity();
@@ -286,6 +290,10 @@ export class Director extends createSystem({
       /** Demo view: also draw the real, unmirrored hand as a blue outline. */
       reveal: (on?: unknown) => {
         this.reveal = on !== 'off' && on !== false;
+      },
+      /** Demo view: 0 off, 1 joints, 2 and the mirror plane, 3 and the reflection. */
+      explain: (level?: unknown) => {
+        this.explain.setLevel(Number(level) || 0);
       },
       sound,
     };
@@ -624,6 +632,7 @@ export class Director extends createSystem({
     this.panel.mesh.rotation.x = -0.15;
     this.chooseRing.position.set(0, seat.workY + 0.03, -0.4);
     this.seam.position.set(0, seat.workY - 0.02, -0.46);
+    this.explain.place(seat.workY);
 
     // Buttons sit low and near, between the knees and the work area. "Skip"
     // and "Finish" go on the far side from the lead hand, so that hand has
@@ -690,6 +699,12 @@ export class Director extends createSystem({
       ghost.show(this.reveal && mirroring && side !== this.leadSide);
       ghost.update(this.hands[side], dt);
     }
+    this.explain.update(
+      this.context.lead,
+      this.mirrors[this.leadSide === 'left' ? 'right' : 'left'],
+      mirroring,
+      dt,
+    );
 
     // The seam is bright while the hands are being brought together, then
     // stays as a faint reminder for as long as the mirror is on.
