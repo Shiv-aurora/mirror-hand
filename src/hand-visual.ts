@@ -82,6 +82,8 @@ const DEPTH_FRAGMENT = /* glsl */ `
   varying vec3 vNormalView;
   varying vec3 vToEye;
   void main() {
+    // While the hand is fading in or out it should not hide what is behind.
+    if (opacity < 0.9) discard;
     float alpha = smoothstep(fadeFrom, fadeTo, vWristDist) * opacity;
     if (alpha < 0.01) discard;
     gl_FragColor = vec4(0.0);
@@ -105,18 +107,29 @@ export class HandVisual {
   private opacity = 0;
   private targetOpacity = 0;
 
-  constructor(readonly side: Side) {
-    const gltf = AssetManager.getGLTF(`hand-${side}`, { shared: true });
+  private readonly maxOpacity: number;
+
+  /**
+   * @param ghost Draw a faint blue see-through hand instead of the solid
+   *   one. Used only by the demo "reveal" view, to show where a hand really
+   *   is while its reflection is on screen.
+   */
+  constructor(
+    readonly side: Side,
+    ghost = false,
+  ) {
+    this.maxOpacity = ghost ? 0.42 : 1;
+    const gltf = AssetManager.getGLTF(`hand-${side}`);
     if (!gltf) {
       throw new Error(`Hand model for the ${side} hand did not load.`);
     }
     const model = gltf.scene;
-    this.root.name = `mirror-hand-${side}`;
+    this.root.name = `${ghost ? 'real' : 'mirror'}-hand-${side}`;
     this.root.add(model);
 
     const uniforms = {
-      baseColor: { value: new Color(0xd9c9b8) },
-      rimColor: { value: new Color(0xffe2b0) },
+      baseColor: { value: new Color(ghost ? 0x3f6fd0 : 0xd9c9b8) },
+      rimColor: { value: new Color(ghost ? 0x9fc8ff : 0xffe2b0) },
       opacity: { value: 0 },
       glow: { value: 0 },
       fadeFrom: { value: -0.03 },
@@ -168,8 +181,7 @@ export class HandVisual {
         lowest = Math.min(lowest, distances[i]);
       }
       uniforms.fadeFrom.value = lowest + 0.002;
-      uniforms.fadeTo.value = Math.max(lowest + 0.03, 0.014);
-      (globalThis as { __handFade?: number[] }).__handFade = [lowest];
+      uniforms.fadeTo.value = Math.max(lowest + 0.02, 0.002);
       skinned.geometry.setAttribute(
         'wristDist',
         new BufferAttribute(distances, 1),
@@ -206,9 +218,16 @@ export class HandVisual {
     this.root.visible = false;
   }
 
+  /** Hide at once, with no fade (the session is paused). */
+  hideNow(): void {
+    this.opacity = 0;
+    this.material.uniforms.opacity.value = 0;
+    this.root.visible = false;
+  }
+
   /** Fade the hand in or out. */
   show(visible: boolean): void {
-    this.targetOpacity = visible ? 1 : 0;
+    this.targetOpacity = visible ? this.maxOpacity : 0;
   }
 
   setGlow(amount: number): void {

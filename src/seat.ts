@@ -2,7 +2,8 @@ import { Euler, Matrix4, Quaternion, Vector3 } from '@iwsdk/core';
 
 /**
  * The "seat frame": a coordinate frame fixed to where the person is sitting.
- * Origin is on the floor under the head, -Z is the way they were facing when
+ * Origin is on the floor under the head (or a seated height below it when the
+ * browser has no floor), -Z is the way they were facing when
  * calibrated, +X is their right. The mirror plane is X = 0 in this frame — the
  * body's midline — and it stays put when the head turns.
  */
@@ -26,13 +27,17 @@ export class Seat {
     const yaw = this.euler.y;
     this.euler.set(0, yaw, 0, 'YXZ');
     this.quat.setFromEuler(this.euler);
-    this.pos.set(headPosition.x, 0, headPosition.z);
+    // With a floor-level reference space the head is about a metre up. If
+    // the browser could only give a head-level space, the head reads near
+    // zero; then put our own floor a seated height below it.
+    const floor = headPosition.y < 0.3 ? headPosition.y - 1.18 : 0;
+    this.pos.set(headPosition.x, floor, headPosition.z);
     this.matrix.compose(this.pos, this.quat, this.one);
     this.inverse.copy(this.matrix).invert();
     this.mirror.copy(this.matrix).multiply(this.flipX).multiply(this.inverse);
     // Seated eye height is usually 1.05–1.3 m; clamp so a standing or
     // lying-down start still gives a usable layout.
-    this.headY = Math.min(1.75, Math.max(0.85, headPosition.y));
+    this.headY = Math.min(1.75, Math.max(0.85, headPosition.y - floor));
     this.calibrated = true;
   }
 

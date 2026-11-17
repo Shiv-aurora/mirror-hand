@@ -41,6 +41,9 @@ export class Sound {
     if (!ctx || !this.master || this.muted) {
       return;
     }
+    if (ctx.state === 'suspended') {
+      void ctx.resume();
+    }
     const now = ctx.currentTime;
     const frequency = 220 * Math.pow(2, semitones / 12);
     const gain = ctx.createGain();
@@ -94,35 +97,60 @@ export class Sound {
     osc.stop(now + 0.12);
   }
 
-  /** A very quiet two-note pad that runs under the whole session. */
+  /** A very quiet pad that runs under the whole session. Fades in. */
   startDrone(): void {
     const ctx = this.context;
-    if (!ctx || !this.master || this.drone) {
+    if (!ctx || !this.master) {
       return;
     }
     const now = ctx.currentTime;
-    this.drone = ctx.createGain();
-    this.drone.gain.setValueAtTime(0, now);
-    this.drone.gain.linearRampToValueAtTime(0.05, now + 6);
-    const filter = ctx.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.frequency.value = 520;
-    this.drone.connect(filter);
-    filter.connect(this.master);
-    for (const frequency of [110, 164.81, 220.7]) {
-      const osc = ctx.createOscillator();
-      osc.type = 'triangle';
-      osc.frequency.value = frequency;
-      const lfo = ctx.createOscillator();
-      const depth = ctx.createGain();
-      lfo.frequency.value = 0.05 + Math.random() * 0.06;
-      depth.gain.value = 0.6;
-      lfo.connect(depth);
-      depth.connect(osc.frequency);
-      osc.connect(this.drone);
-      osc.start(now);
-      lfo.start(now);
+    if (!this.drone) {
+      this.drone = ctx.createGain();
+      this.drone.gain.setValueAtTime(0, now);
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = 520;
+      this.drone.connect(filter);
+      filter.connect(this.master);
+      for (const frequency of [110, 164.81, 220.7]) {
+        const osc = ctx.createOscillator();
+        osc.type = 'triangle';
+        osc.frequency.value = frequency;
+        const lfo = ctx.createOscillator();
+        const depth = ctx.createGain();
+        lfo.frequency.value = 0.05 + Math.random() * 0.06;
+        depth.gain.value = 0.6;
+        lfo.connect(depth);
+        depth.connect(osc.frequency);
+        osc.connect(this.drone);
+        osc.start(now);
+        lfo.start(now);
+      }
     }
+    const gain = this.drone.gain;
+    gain.cancelScheduledValues(now);
+    gain.setValueAtTime(gain.value, now);
+    gain.linearRampToValueAtTime(0.05, now + 6);
+  }
+
+  /** Fade the pad out, for when the session ends. */
+  stopDrone(): void {
+    const ctx = this.context;
+    if (!ctx || !this.drone) {
+      return;
+    }
+    const now = ctx.currentTime;
+    const gain = this.drone.gain;
+    gain.cancelScheduledValues(now);
+    gain.setValueAtTime(gain.value, now);
+    gain.linearRampToValueAtTime(0, now + 0.6);
+  }
+
+  /** For recording a demo: the node everything plays through. */
+  get output(): { context: AudioContext; node: AudioNode } | null {
+    return this.context && this.master
+      ? { context: this.context, node: this.master }
+      : null;
   }
 }
 

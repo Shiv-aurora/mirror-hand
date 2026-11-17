@@ -1,10 +1,12 @@
 import {
+  AdditiveBlending,
   CircleGeometry,
   createSystem,
   Group,
   Hovered,
   Mesh,
   MeshBasicMaterial,
+  PlaneGeometry,
   Pressed,
   Quaternion,
   RayInteractable,
@@ -23,7 +25,7 @@ import {
 } from './activities.js';
 import { PENTATONIC, sound } from './audio.js';
 import { Pad } from './components.js';
-import { Garden } from './garden.js';
+import { Garden, getGlowTexture } from './garden.js';
 import { HandState, otherSide, type Side } from './hand-tracking.js';
 import { HandVisual } from './hand-visual.js';
 import { Seat } from './seat.js';
@@ -60,7 +62,13 @@ export class Director extends createSystem({
   private hands!: Record<Side, HandState>;
   private mirrors!: Record<Side, HandState>;
   private visuals!: Record<Side, HandVisual>;
+  /** Demo only: faint outlines of where the hands really are. */
+  private ghosts!: Record<Side, HandVisual>;
+  private reveal = false;
+  private seam!: Mesh;
+  private seamLevel = 0;
   private pads!: Record<string, PadButton>;
+  private padList!: PadButton[];
   private activities!: Activity[];
   private turn!: TurnActivity;
   private bloom!: BloomActivity;
@@ -77,7 +85,6 @@ export class Director extends createSystem({
   private lostFor = 0;
   private showingLostHint = false;
   private noHandsFor = 0;
-  private hideTimer = 0;
   private idleClock = 0;
   private wasInXR = false;
 
@@ -134,6 +141,24 @@ export class Director extends createSystem({
     this.chooseRing.visible = false;
     this.stage.add(this.chooseRing);
 
+    // The mirror line: a seam of light along the middle of the body, where
+    // the real hand and its reflection meet.
+    this.seam = new Mesh(
+      new PlaneGeometry(0.03, 0.46),
+      new MeshBasicMaterial({
+        map: getGlowTexture(),
+        color: 0xffe2b0,
+        transparent: true,
+        opacity: 0,
+        blending: AdditiveBlending,
+        depthWrite: false,
+        toneMapped: false,
+      }),
+    );
+    this.seam.rotation.x = -Math.PI / 2;
+    this.seam.visible = false;
+    this.stage.add(this.seam);
+
     this.bloom = new BloomActivity();
     this.turn = new TurnActivity();
     this.activities = [
@@ -162,7 +187,16 @@ export class Director extends createSystem({
       left: new HandVisual('left'),
       right: new HandVisual('right'),
     };
-    handsRoot.add(this.visuals.left.root, this.visuals.right.root);
+    this.ghosts = {
+      left: new HandVisual('left', true),
+      right: new HandVisual('right', true),
+    };
+    handsRoot.add(
+      this.visuals.left.root,
+      this.visuals.right.root,
+      this.ghosts.left.root,
+      this.ghosts.right.root,
+    );
 
     this.pads = {
       skip: new PadButton('skip', 'Skip'),
@@ -170,7 +204,8 @@ export class Director extends createSystem({
       again: new PadButton('again', 'Again'),
       finish: new PadButton('finish', 'Finish'),
     };
-    for (const pad of Object.values(this.pads)) {
+    this.padList = Object.values(this.pads);
+    for (const pad of this.padList) {
       pad.group.visible = false;
       const entity = this.world.createTransformEntity(pad.group, {
         parent: stageEntity,
@@ -248,6 +283,11 @@ export class Director extends createSystem({
       }),
       recentre: () => this.recentre(),
       press: (action: string) => this.onPad(action),
+      /** Demo view: also draw the real, unmirrored hand as a blue outline. */
+      reveal: (on?: unknown) => {
+        this.reveal = on !== 'off' && on !== false;
+      },
+      sound,
     };
   }
 
@@ -273,10 +313,14 @@ export class Director extends createSystem({
     }
     // The headset menu is open or the headset is off the head: hold still.
     if (visibility !== VisibilityState.Visible) {
+      this.visuals.left.hideNow();
+      this.visuals.right.hideNow();
+      this.ghosts.left.hideNow();
+      this.ghosts.right.hideNow();
       return;
     }
 
-    this.hideBuiltInHands(dt);
+    this.hideBuiltInHands();
     this.readHands(dt);
     this.phaseTime += dt;
 
@@ -502,7 +546,9 @@ export class Director extends createSystem({
     sound.chord([0, 7, 12, 16], 0.32, 0.14);
 
     const count = this.store.sessions.length;
-    const eyebrow = `Session ${count} complete`;
+    const days = this.store.days;
+    const eyebrow =
+      days > 1 ? `Session ${count} · day ${days}` : `Session ${count} complete`;
     const note = 'An estimate from hand tracking, not a clinical measurement.';
     if (range === null) {
       this.panel.set({
@@ -577,6 +623,7 @@ export class Director extends createSystem({
     this.panel.mesh.position.set(0, seat.headY - 0.2, -0.98);
     this.panel.mesh.rotation.x = -0.15;
     this.chooseRing.position.set(0, seat.workY + 0.03, -0.4);
+    this.seam.position.set(0, seat.workY - 0.02, -0.46);
 
     // Buttons sit low and near, between the knees and the work area. "Skip"
     // and "Finish" go on the far side from the lead hand, so that hand has
@@ -638,6 +685,22 @@ export class Director extends createSystem({
       this.visuals[side].show(this.phase !== 'arrive' && !(reflected && crossed));
       this.visuals[side].update(state, dt);
     }
+    for (const side of SIDES) {
+      const ghost = this.ghosts[side];
+      ghost.show(this.reveal && mirroring && side !== this.leadSide);
+      ghost.update(this.hands[side], dt);
+    }
+
+    // The seam is bright while the hands are being brought together, then
+    // stays as a faint reminder for as long as the mirror is on.
+    const seamTarget = !mirroring
+      ? 0
+      : this.phase === 'meet'
+        ? 0.55 + 0.45 * Math.min(1, this.meetHold / 0.5)
+        : 0.16;
+    this.seamLevel += (seamTarget - this.seamLevel) * Math.min(1, dt * 3);
+    (this.seam.material as MeshBasicMaterial).opacity = this.seamLevel;
+    this.seam.visible = this.seamLevel > 0.01;
   }
 
   private updatePads(dt: number): void {
@@ -653,7 +716,7 @@ export class Director extends createSystem({
       this.player.localToWorld(this.fingertip);
       tip = this.fingertip;
     }
-    for (const pad of Object.values(this.pads)) {
+    for (const pad of this.padList) {
       if (pad.update(dt, tip)) {
         this.onPad(pad.action);
       }
@@ -665,12 +728,7 @@ export class Director extends createSystem({
    * input manager re-shows its hand model every frame, so hide the meshes
    * inside the model instead of the model itself.
    */
-  private hideBuiltInHands(dt: number): void {
-    this.hideTimer -= dt;
-    if (this.hideTimer > 0) {
-      return;
-    }
-    this.hideTimer = 0.5;
+  private hideBuiltInHands(): void {
     const adapters = this.input.xr.visualAdapters.hand;
     for (const side of SIDES) {
       const model = adapters[side].visual?.model;
@@ -695,6 +753,10 @@ export class Director extends createSystem({
     this.panel.hide();
     this.visuals.left.show(false);
     this.visuals.right.show(false);
+    this.ghosts.left.hideNow();
+    this.ghosts.right.hideNow();
+    this.seam.visible = false;
+    this.seamLevel = 0;
     this.hands.left.tracked = false;
     this.hands.right.tracked = false;
     this.headPosition.set(0, 1.18, 0);

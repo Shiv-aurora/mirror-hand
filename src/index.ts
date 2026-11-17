@@ -73,15 +73,27 @@ World.create(container, projectOptions)
       world.launchXR();
     });
 
+    // The browser's own "Enter VR" button starts a session without our
+    // Begin click, so sound is also unlocked by the first pinch in VR.
+    let sessionWithUnlock: XRSession | null = null;
+    const unlockOnPinch = (): void => sound.unlock();
+
     world.visibilityState.subscribe((state) => {
       const inVR = state !== VisibilityState.NonImmersive;
       landing.classList.toggle('hidden', inVR);
       if (!inVR) {
         showHistory();
+        sound.stopDrone();
+        return;
+      }
+      const session = world.xrSession ?? null;
+      if (session && session !== sessionWithUnlock) {
+        sessionWithUnlock = session;
+        session.addEventListener('selectstart', unlockOnPinch);
       }
       if (state === VisibilityState.Hidden) {
         sound.suspend();
-      } else if (inVR) {
+      } else {
         sound.unlock();
         sound.resume();
       }
