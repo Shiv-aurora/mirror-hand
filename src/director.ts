@@ -30,7 +30,8 @@ import { Garden, getGlowTexture } from './garden.js';
 import { HandState, otherSide, type Side } from './hand-tracking.js';
 import { HandVisual } from './hand-visual.js';
 import { Seat } from './seat.js';
-import { Store } from './store.js';
+import { Store, type Comfort } from './store.js';
+import { planSession, standardPlan } from './tailor.js';
 import { PadButton, TextPanel } from './ui.js';
 
 type Phase =
@@ -40,12 +41,16 @@ type Phase =
   | 'meet'
   | 'activity'
   | 'rest'
+  | 'comfort'
   | 'summary';
 
 const SIDES: readonly Side[] = ['left', 'right'];
 const CHOOSE_SECONDS = 1.2;
 const CHOOSE_RADIUS = 0.15;
 const DISCLAIMER = 'A gentle practice inspired by mirror therapy. Not a medical device.';
+/** The "How did that feel?" question waits this long, then moves on. */
+const COMFORT_SECONDS = 25;
+const COMFORT_ANSWERS: readonly Comfort[] = ['fine', 'sore', 'painful'];
 
 /**
  * Runs the whole session: finds the hands, decides which one leads, shows
@@ -73,8 +78,15 @@ export class Director extends createSystem({
   private pads!: Record<string, PadButton>;
   private padList!: PadButton[];
   private activities!: Activity[];
+  /** Today's activities in order: the mirrored ones in the plan, then "your turn". */
+  private sequence: Activity[] = [];
   private turn!: TurnActivity;
   private bloom!: BloomActivity;
+  private chimes!: ChimesActivity;
+  private fireflies!: FirefliesActivity;
+  /** Mirrored activities ended with the Skip button this session. */
+  private skipped = 0;
+  private comfort: Comfort | null = null;
   private context!: Context;
   private chooseRing!: Mesh;
   private chooseFill!: Mesh;
@@ -164,13 +176,11 @@ export class Director extends createSystem({
     this.stage.add(this.explain.group);
 
     this.bloom = new BloomActivity();
+    this.chimes = new ChimesActivity();
+    this.fireflies = new FirefliesActivity();
     this.turn = new TurnActivity();
-    this.activities = [
-      this.bloom,
-      new ChimesActivity(),
-      new FirefliesActivity(),
-      this.turn,
-    ];
+    this.activities = [this.bloom, this.chimes, this.fireflies, this.turn];
+    this.sequence = [...this.activities];
     for (const activity of this.activities) {
       this.stage.add(activity.group);
     }
@@ -207,6 +217,9 @@ export class Director extends createSystem({
       recentre: new PadButton('recentre', 'Re-centre'),
       again: new PadButton('again', 'Again'),
       finish: new PadButton('finish', 'Finish'),
+      fine: new PadButton('fine', 'Fine'),
+      sore: new PadButton('sore', 'A bit sore'),
+      painful: new PadButton('painful', 'Painful'),
     };
     this.padList = Object.values(this.pads);
     for (const pad of this.padList) {
@@ -231,7 +244,14 @@ export class Director extends createSystem({
       panel: this.panel,
       home: new Vector3(0.16, 0.9, -0.36),
       range: { open: 0.86, closed: 0.66, learned: false },
-      result: { range: null },
+      fingerRange: {
+        open: new Float32Array(4),
+        closed: new Float32Array(4),
+        learned: false,
+      },
+      plan: standardPlan(),
+      step: { number: 1, count: 3 },
+      result: { range: null, fingers: null, stalls: 0 },
       ripple: (x, z) => this.garden.ripple(x, z),
     };
 
@@ -276,12 +296,19 @@ export class Director extends createSystem({
         rightOpenness: this.hands.right.openness,
         range: { ...this.context.range },
         result: this.context.result.range,
+        fingers: this.context.result.fingers,
+        stalls: this.context.result.stalls,
+        skipped: this.skipped,
+        comfort: this.comfort,
+        plan: this.context.plan,
+        note: this.panel.content.note ?? null,
         sessions: this.store.sessions.length,
         headY: this.seat.headY,
         pinch: Array.from(this.context.lead.pinch),
         leadPalm: this.context.lead.palm.toArray(),
         home: this.context.home.toArray(),
         title: this.panel.content.title,
+        eyebrow: this.panel.content.eyebrow ?? null,
         indexTip: this.context.lead.points[9].toArray(),
         progress: this.panel.content.progress ?? null,
       }),
@@ -350,6 +377,11 @@ export class Director extends createSystem({
           this.startActivity(this.activityIndex + 1);
         }
         break;
+      case 'comfort':
+        if (this.phaseTime > COMFORT_SECONDS) {
+          this.showSummary();
+        }
+        break;
       default:
         break;
     }
@@ -366,8 +398,13 @@ export class Director extends createSystem({
     const inSession = phase === 'meet' || phase === 'activity' || phase === 'rest';
     this.pads.skip.group.visible = inSession;
     this.pads.recentre.group.visible = inSession;
-    this.pads.again.group.visible = phase === 'summary';
+    // After a painful session the only way on is to stop.
+    this.pads.again.group.visible =
+      phase === 'summary' && this.comfort !== 'painful';
     this.pads.finish.group.visible = phase === 'summary';
+    for (const answer of COMFORT_ANSWERS) {
+      this.pads[answer].group.visible = phase === 'comfort';
+    }
     this.chooseRing.visible = phase === 'choose';
     this.showingLostHint = false;
     this.lostFor = 0;
@@ -381,6 +418,8 @@ export class Director extends createSystem({
     // (no floor), so do not wait for a tall reading for ever.
     const settled = this.headPosition.y > 0.3 || this.phaseTime > 3;
     if (this.phaseTime > 0.8 && settled) {
+      // Pick up anything changed on the landing page since the last session.
+      this.store.reload();
       this.recentre();
       this.chooseHold.left = 0;
       this.chooseHold.right = 0;
@@ -435,11 +474,14 @@ export class Director extends createSystem({
       sound.chord([PENTATONIC[0], PENTATONIC[2], PENTATONIC[4]], 0.35);
       this.enter('meet');
       this.meetHold = 0;
+      // Say what is different about today's session before it starts.
+      const plan = this.context.plan;
+      const mirror = `Your ${chosen} hand now moves both. Whatever it does, the other mirrors.`;
       this.panel.set({
         eyebrow: 'The mirror',
         title: `Watch your ${this.context.otherSide} hand`,
-        body: `Your ${chosen} hand now moves both. Whatever it does, the other mirrors.\nTouch your hands together to begin.`,
-        note: DISCLAIMER,
+        body: `${plan.caution ?? mirror}\nTouch your hands together to begin.`,
+        note: plan.note ?? DISCLAIMER,
       });
     }
   }
@@ -465,7 +507,43 @@ export class Director extends createSystem({
     context.range.open = Math.max(0.86, context.lead.openness);
     context.range.closed = Math.min(0.66, context.lead.openness);
     context.range.learned = false;
+    context.fingerRange.learned = false;
+    this.planToday();
     this.layout();
+  }
+
+  /** Work out today's session from the last few with this lead hand. */
+  private planToday(): void {
+    const context = this.context;
+    const plan = planSession(
+      this.store.sessions,
+      context.leadSide,
+      this.store.settings,
+    );
+    context.plan = plan;
+    this.sequence.length = 0;
+    if (plan.include.bloom) {
+      this.sequence.push(this.bloom);
+    }
+    if (plan.include.chimes) {
+      this.sequence.push(this.chimes);
+    }
+    if (plan.include.reach) {
+      this.sequence.push(this.fireflies);
+    }
+    context.step.count = this.sequence.length;
+    this.sequence.push(this.turn);
+  }
+
+  /** Start (or start again) from the first activity, with a clean slate. */
+  private beginSession(): void {
+    const result = this.context.result;
+    result.range = null;
+    result.fingers = null;
+    result.stalls = 0;
+    this.skipped = 0;
+    this.comfort = null;
+    this.startActivity(0);
   }
 
   private updateMeet(dt: number): void {
@@ -491,22 +569,23 @@ export class Director extends createSystem({
       this.visuals.left.setGlow(0);
       this.visuals.right.setGlow(0);
       sound.chord([PENTATONIC[1], PENTATONIC[3], PENTATONIC[5]], 0.35);
-      this.startActivity(0);
+      this.beginSession();
     }
   }
 
   private startActivity(index: number): void {
-    if (index >= this.activities.length) {
+    if (index >= this.sequence.length) {
       this.finishSession();
       return;
     }
     this.activityIndex = index;
+    this.context.step.number = index + 1;
     this.enter('activity');
-    this.activities[index].begin(this.context);
+    this.sequence[index].begin(this.context);
   }
 
   private updateActivity(dt: number): void {
-    const activity = this.activities[this.activityIndex];
+    const activity = this.sequence[this.activityIndex];
     const isTurn = activity === this.turn;
 
     // If the lead hand drops out of view, say so instead of going quiet.
@@ -530,9 +609,9 @@ export class Director extends createSystem({
   }
 
   private endActivity(): void {
-    const activity = this.activities[this.activityIndex];
+    const activity = this.sequence[this.activityIndex];
     activity.end(this.context);
-    if (this.activityIndex + 1 >= this.activities.length) {
+    if (this.activityIndex + 1 >= this.sequence.length) {
       this.finishSession();
     } else {
       this.enter('rest');
@@ -541,23 +620,56 @@ export class Director extends createSystem({
 
   private finishSession(): void {
     const context = this.context;
-    const previous = this.store.sessions
-      .filter((session) => session.range !== null)
-      .map((session) => session.range as number);
-    const range = context.result.range;
+    // Saved now, so the session counts even if the headset comes off before
+    // the question is answered.
     this.store.add({
       at: Date.now(),
       lead: context.leadSide,
-      range,
+      range: context.result.range,
+      fingers: context.result.fingers,
+      stalls: context.result.stalls,
+      skipped: this.skipped,
+      comfort: null,
+      level: context.plan.level,
+      focus: context.plan.focus,
     });
-    this.enter('summary');
+    this.comfort = null;
+    this.enter('comfort');
     sound.chord([0, 7, 12, 16], 0.32, 0.14);
+    this.panel.set({
+      eyebrow: 'One question',
+      title: 'How did that feel?',
+      body: 'Your answer shapes the next session. If you would rather not say, just wait.',
+    });
+  }
 
-    const count = this.store.sessions.length;
+  private answerComfort(comfort: Comfort): void {
+    this.comfort = comfort;
+    this.store.setComfort(comfort);
+    this.showSummary();
+  }
+
+  private showSummary(): void {
+    const context = this.context;
+    const sessions = this.store.sessions;
+    const range = sessions.length > 0 ? sessions[sessions.length - 1].range : null;
+    const previous: number[] = [];
+    for (let i = 0; i < sessions.length - 1; i++) {
+      const value = sessions[i].range;
+      if (value !== null) {
+        previous.push(value);
+      }
+    }
+    this.enter('summary');
+
+    const count = sessions.length;
     const days = this.store.days;
     const eyebrow =
       days > 1 ? `Session ${count} · day ${days}` : `Session ${count} complete`;
-    const note = 'An estimate from hand tracking, not a clinical measurement.';
+    const note =
+      this.comfort === 'painful'
+        ? 'Rest now, and check with your clinician before the next session.'
+        : 'An estimate from hand tracking, not a clinical measurement.';
     if (range === null) {
       this.panel.set({
         eyebrow,
@@ -594,14 +706,26 @@ export class Director extends createSystem({
         break;
       case 'skip':
         if (this.phase === 'meet') {
-          this.startActivity(0);
+          this.beginSession();
         } else if (this.phase === 'activity') {
+          // Skipping a mirrored movement tells the next plan it was too much.
+          if (this.sequence[this.activityIndex] !== this.turn) {
+            this.skipped++;
+          }
           this.endActivity();
         }
         break;
       case 'again':
-        this.context.result.range = null;
-        this.startActivity(0);
+        // The session just saved may change what comes next.
+        this.planToday();
+        this.beginSession();
+        break;
+      case 'fine':
+      case 'sore':
+      case 'painful':
+        if (this.phase === 'comfort') {
+          this.answerComfort(action);
+        }
         break;
       case 'finish':
         this.world.exitXR();
@@ -647,6 +771,10 @@ export class Director extends createSystem({
     place(this.pads.recentre, -far * 0.075);
     place(this.pads.again, -far * 0.075);
     place(this.pads.finish, far * 0.075);
+    // The three answers: "Fine" nearest the lead hand, "Painful" furthest.
+    place(this.pads.fine, -far * 0.15);
+    place(this.pads.sore, 0);
+    place(this.pads.painful, far * 0.15);
   }
 
   private readHands(dt: number): void {
@@ -679,7 +807,7 @@ export class Director extends createSystem({
       (this.phase === 'meet' ||
         this.phase === 'rest' ||
         (this.phase === 'activity' &&
-          this.activities[this.activityIndex] !== this.turn));
+          this.sequence[this.activityIndex] !== this.turn));
     // When the lead hand reaches across the middle (to press a button), its
     // reflection would pass through it, so the reflection fades out.
     const leadSign = this.leadSide === 'left' ? -1 : 1;

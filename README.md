@@ -40,12 +40,41 @@ not seeing the hand that is not moving.
 5. **Reach** — move both hands out to pairs of fireflies and hold.
 6. **Your turn** — the mirror switches off. Open and close the other hand as far
    as is comfortable for twenty seconds.
-7. **Summary** — how far that hand moved, as a share of the stronger hand's own
+7. **One question** — "How did that feel?": fine, a bit sore, or painful.
+   Waiting is also an answer.
+8. **Summary** — how far that hand moved, as a share of the stronger hand's own
    range, next to your earlier sessions.
 
 Everything adapts to the person: the range is measured against their own
 stronger hand, reach targets are placed around where they first held it, and
 every activity moves on by itself if a movement is not possible.
+
+## Tailoring
+
+From the third session on, each session is planned from the last few with the
+same leading hand. The rules are plain and run on the device
+([src/tailor.ts](src/tailor.ts), with tests in
+[devtools/tailor.test.mjs](devtools/tailor.test.mjs)); there is no model and
+nothing is sent anywhere.
+
+- **Shorter, with nearer targets** after a session reported as painful (with
+  either hand leading, and even when tailoring is switched off), after
+  two reported as sore, or after two in which movements stalled or were
+  skipped.
+- **A little more of each movement** after two sessions, on two different
+  days, that went smoothly and were reported as fine. Stepping down never
+  waits for another day.
+- **Extra touches for one finger** when it clearly opened least in "your turn"
+  across the last sessions. Hand tracking is noisy, so the gap has to be large
+  and seen in at least two sessions.
+- The start page says what the next session will be and why. Under "Session
+  settings" a person or their therapist can switch tailoring off, keep every
+  session short, leave a movement out, or clear the history.
+
+The first two sessions are always the standard one. The rules follow ideas
+from rehabilitation research (match the difficulty to the person, repeat the
+movement that is hardest, stop when it hurts), but tailoring in this app has
+not been tested with patients.
 
 ## Hand and gaze input
 

@@ -4,6 +4,7 @@ import { Firefly, Lantern, Lotus } from './garden.js';
 import type { HandState, Side } from './hand-tracking.js';
 import type { HandVisual } from './hand-visual.js';
 import type { Seat } from './seat.js';
+import type { SessionPlan } from './tailor.js';
 import type { TextPanel } from './ui.js';
 
 /** Everything an activity can read or drive. Owned by the director. */
@@ -28,8 +29,24 @@ export interface Context {
    * of this person's own range, not of some average hand.
    */
   range: { open: number; closed: number; learned: boolean };
-  /** Filled in by the "your turn" activity. */
-  result: { range: number | null };
+  /**
+   * The same, finger by finger (index..little), so the other hand's fingers
+   * can each be measured against the lead hand's own.
+   */
+  fingerRange: { open: Float32Array; closed: Float32Array; learned: boolean };
+  /** Today's session, tailored from the last few (see tailor.ts). */
+  plan: SessionPlan;
+  /** Which of the mirrored movements this is, for the "1 of 3" label. */
+  step: { number: number; count: number };
+  /**
+   * What the session found. `range` and `fingers` are filled in by "your
+   * turn"; `stalls` counts steps that moved on because no movement was seen.
+   */
+  result: {
+    range: number | null;
+    fingers: (number | null)[] | null;
+    stalls: number;
+  };
   /** Start a ripple on the water under a point given in seat space. */
   ripple(x: number, z: number): void;
 }
@@ -119,12 +136,47 @@ class OpenCloseCounter {
   }
 }
 
+/**
+ * Follows each finger's own opening (the `reach` values of a hand) and keeps
+ * the lowest and highest it has seen, smoothed so one noisy frame of tracking
+ * does not count as movement.
+ */
+class FingerSpans {
+  readonly low = new Float32Array(4);
+  readonly high = new Float32Array(4);
+  private readonly smoothed = new Float32Array(4);
+  private started = false;
+
+  reset(): void {
+    this.started = false;
+    this.low.fill(1);
+    this.high.fill(0);
+  }
+
+  update(reach: Float32Array, delta: number): void {
+    const ease = Math.min(1, delta * 12);
+    for (let f = 0; f < 4; f++) {
+      if (!this.started) {
+        this.smoothed[f] = reach[f];
+      }
+      this.smoothed[f] += (reach[f] - this.smoothed[f]) * ease;
+      this.low[f] = Math.min(this.low[f], this.smoothed[f]);
+      this.high[f] = Math.max(this.high[f], this.smoothed[f]);
+    }
+    this.started = true;
+  }
+}
+
+const stepLabel = (context: Context, name: string): string =>
+  `${context.step.number} of ${context.step.count} · ${name}`;
+
 /** 1 of 3: open and close both hands; two water lilies follow. */
 export class BloomActivity implements Activity {
   readonly group = new Group();
   private readonly lilies = [new Lotus(0xf7c9d8), new Lotus(0xf7c9d8)];
   private readonly counter = new OpenCloseCounter();
-  private readonly target = 6;
+  private readonly spans = new FingerSpans();
+  private target = 6;
   private cycles = 0;
   private stall = 0;
 
@@ -143,6 +195,8 @@ export class BloomActivity implements Activity {
     this.lilies[0].group.position.set(-x - 0.04, y, LILY_Z);
     this.lilies[1].group.position.set(x + 0.04, y, LILY_Z);
     this.counter.reset();
+    this.spans.reset();
+    this.target = context.plan.bloom;
     this.cycles = 0;
     this.stall = 0;
     this.group.visible = true;
@@ -153,6 +207,7 @@ export class BloomActivity implements Activity {
     const { lead, range } = context;
     this.stall += delta;
     if (lead.tracked) {
+      this.spans.update(lead.reach, delta);
       const span = Math.max(0.12, range.open - range.closed);
       const event = this.counter.update(
         lead.openness,
@@ -164,6 +219,9 @@ export class BloomActivity implements Activity {
         range.open = this.counter.high;
         range.closed = this.counter.low;
         range.learned = true;
+        context.fingerRange.open.set(this.spans.high);
+        context.fingerRange.closed.set(this.spans.low);
+        context.fingerRange.learned = true;
       } else {
         range.open = Math.max(range.open, this.counter.high);
         range.closed = Math.min(range.closed, this.counter.low);
@@ -199,11 +257,14 @@ export class BloomActivity implements Activity {
       this.counter.direction === 1 &&
       this.counter.smoothed >
         range.open - 0.2 * Math.max(0.08, range.open - range.closed);
-    return (
-      Math.floor(this.counter.halfCycles / 2) >= this.target ||
-      lastOpening ||
-      this.stall > STALL_SECONDS
-    );
+    if (Math.floor(this.counter.halfCycles / 2) >= this.target || lastOpening) {
+      return true;
+    }
+    if (this.stall > STALL_SECONDS) {
+      context.result.stalls++;
+      return true;
+    }
+    return false;
   }
 
   end(): void {
@@ -225,7 +286,7 @@ export class BloomActivity implements Activity {
   prompt(context: Context): void {
     const closing = this.counter.direction === -1;
     context.panel.set({
-      eyebrow: '1 of 3 · Open and close',
+      eyebrow: stepLabel(context, 'Open and close'),
       title: closing ? 'Now close them gently' : 'Open both hands wide',
       body: `Go slowly. Watch your ${context.otherSide} hand, and try to move it along too.`,
       progress: Math.floor(this.counter.halfCycles / 2) / this.target,
@@ -250,6 +311,8 @@ const CHIME_ORDER = [0, 1, 2, 3, 3, 2, 1, 0, 0, 1, 2, 3] as const;
 export class ChimesActivity implements Activity {
   readonly group = new Group();
   private readonly lanterns: Lantern[] = [];
+  /** The fingers to touch, in order; set from today's plan. */
+  private order: readonly number[] = CHIME_ORDER;
   private step = 0;
   private touching = -1;
   private candidate = -1;
@@ -277,6 +340,7 @@ export class ChimesActivity implements Activity {
       const arc = -0.012 * Math.abs(i - 1.5);
       this.lanterns[i].group.position.set(x, y + arc, -0.68);
     }
+    this.order = context.plan.chimes;
     this.step = 0;
     this.touching = -1;
     this.candidate = -1;
@@ -290,8 +354,8 @@ export class ChimesActivity implements Activity {
   update(context: Context, delta: number): boolean {
     const { lead } = context;
     this.stall += delta;
-    const wanted = CHIME_ORDER[this.step];
-    if (lead.tracked && this.step < CHIME_ORDER.length) {
+    const wanted = this.order[this.step];
+    if (lead.tracked && this.step < this.order.length) {
       // Which finger, if any, is on the thumb right now? A touch only counts
       // when one finger is clearly the closest, so a closing fist (all four
       // fingertips near the thumb at once) does not ring anything.
@@ -339,13 +403,14 @@ export class ChimesActivity implements Activity {
       }
     }
     // Never leave someone stuck on a touch their hand cannot make.
-    if (this.stall > 10 && this.step < CHIME_ORDER.length) {
+    if (this.stall > 10 && this.step < this.order.length) {
+      context.result.stalls++;
       this.advance(context);
     }
     for (const lantern of this.lanterns) {
       lantern.update(delta);
     }
-    return this.step >= CHIME_ORDER.length;
+    return this.step >= this.order.length;
   }
 
   end(context: Context): void {
@@ -365,8 +430,8 @@ export class ChimesActivity implements Activity {
   }
 
   private cue(context: Context): void {
-    const done = this.step >= CHIME_ORDER.length;
-    const wanted: number = done ? -1 : CHIME_ORDER[this.step];
+    const done = this.step >= this.order.length;
+    const wanted: number = done ? -1 : this.order[this.step];
     for (let i = 0; i < 4; i++) {
       this.lanterns[i].setCue(i === wanted);
     }
@@ -380,10 +445,10 @@ export class ChimesActivity implements Activity {
     }
     if (!done) {
       context.panel.set({
-        eyebrow: '2 of 3 · Finger touches',
+        eyebrow: stepLabel(context, 'Finger touches'),
         title: `Thumb to your ${FINGER_NAMES[wanted] ?? 'next'} finger`,
         body: 'Touch the two lit fingertips together. Each touch rings a lantern.',
-        progress: this.step / CHIME_ORDER.length,
+        progress: this.step / this.order.length,
       });
     }
   }
@@ -412,6 +477,9 @@ export class FirefliesActivity implements Activity {
   private readonly caught: Firefly[] = [];
   private readonly targetLead = new Vector3();
   private readonly swarmCentre = new Vector3();
+  /** How many pairs today, and how far out they sit; from today's plan. */
+  private count = REACHES.length;
+  private scale = 1;
   private index = 0;
   private hold = 0;
   private gap = 0;
@@ -431,6 +499,8 @@ export class FirefliesActivity implements Activity {
   }
 
   begin(context: Context): void {
+    this.count = Math.max(1, Math.min(REACHES.length, context.plan.reach));
+    this.scale = context.plan.reachScale;
     this.index = 0;
     this.hold = 0;
     this.gap = 0.6;
@@ -449,7 +519,7 @@ export class FirefliesActivity implements Activity {
     this.clock += delta;
     this.stall += delta;
     const { lead } = context;
-    const done = this.index >= REACHES.length;
+    const done = this.index >= this.count;
 
     if (!done) {
       if (this.gap > 0) {
@@ -475,7 +545,10 @@ export class FirefliesActivity implements Activity {
         const charge = clamp01(this.hold / CATCH_SECONDS);
         this.pair[0].charge = charge;
         this.pair[1].charge = charge;
-        if (this.hold >= CATCH_SECONDS || this.stall > 18) {
+        if (this.hold >= CATCH_SECONDS) {
+          this.collect(context);
+        } else if (this.stall > 18) {
+          context.result.stalls++;
           this.collect(context);
         }
       }
@@ -534,7 +607,7 @@ export class FirefliesActivity implements Activity {
     this.hold = 0;
     this.stall = 0;
     this.gap = 0.7;
-    if (this.index < REACHES.length) {
+    if (this.index < this.count) {
       this.place(context);
     } else {
       context.sound.chord([0, 7, 12, 16, 19], 0.3, 0.12);
@@ -544,7 +617,10 @@ export class FirefliesActivity implements Activity {
 
   private place(context: Context): void {
     const sign = context.leadSide === 'right' ? 1 : -1;
-    const [out, up, forward] = REACHES[this.index];
+    const reach = REACHES[this.index];
+    const out = reach[0] * this.scale;
+    const up = reach[1] * this.scale;
+    const forward = reach[2] * this.scale;
     const home = context.home;
     const z = Math.min(-0.22, home.z + forward);
     // Keep both lights inside a narrow field of view: no more than about
@@ -558,14 +634,14 @@ export class FirefliesActivity implements Activity {
   }
 
   prompt(context: Context): void {
-    const done = this.index >= REACHES.length;
+    const done = this.index >= this.count;
     context.panel.set({
-      eyebrow: '3 of 3 · Reach',
+      eyebrow: stepLabel(context, 'Reach'),
       title: done ? 'All gathered' : 'Reach for the fireflies',
       body: done
         ? 'Rest your hands for a moment.'
         : 'Move both hands out to the two lights and hold them there.',
-      progress: this.index / REACHES.length,
+      progress: this.index / this.count,
     });
   }
 }
@@ -576,6 +652,8 @@ const TURN_SECONDS = 20;
 /** Open hand to loose fist, on the openness scale, for a typical hand. */
 const TYPICAL_SPAN = 0.5;
 const TURN_UNSEEN_LIMIT = 14;
+/** The least a lead finger must open and close to be measured against. */
+const MIN_FINGER_SPAN = 0.12;
 
 /**
  * "Your turn": the mirror is switched off and the other hand is shown as it
@@ -586,6 +664,7 @@ export class TurnActivity implements Activity {
   readonly group = new Group();
   private readonly lily = new Lotus(0xffe0a8);
   private readonly counter = new OpenCloseCounter();
+  private readonly spans = new FingerSpans();
   private seen = 0;
   private unseen = 0;
   private everSeen = false;
@@ -605,12 +684,14 @@ export class TurnActivity implements Activity {
     this.lily.group.position.set(sign * (x + 0.04), context.seat.workY - 0.118, LILY_Z);
     this.lily.setOpen(0);
     this.counter.reset();
+    this.spans.reset();
     this.seen = 0;
     this.unseen = 0;
     this.everSeen = false;
     this.settle = 0;
     this.shownStep = -1;
     context.result.range = null;
+    context.result.fingers = null;
     this.group.visible = true;
     this.prompt(context);
   }
@@ -626,6 +707,7 @@ export class TurnActivity implements Activity {
           this.prompt(context);
         }
         this.seen += delta;
+        this.spans.update(other.reach, delta);
         const event = this.counter.update(other.openness, delta, 0.03);
         if (event === 'opened') {
           this.lily.flash();
@@ -662,6 +744,28 @@ export class TurnActivity implements Activity {
         ? Math.max(0.1, range.open - range.closed)
         : TYPICAL_SPAN;
       context.result.range = Math.min(1, moved / leadSpan);
+      // Finger by finger, against the lead hand's same finger. Only when the
+      // lead hand's fingers were measured; there is no typical value to fall
+      // back on that would be fair to each finger.
+      const fingerRange = context.fingerRange;
+      if (fingerRange.learned) {
+        const fingers: (number | null)[] = [];
+        for (let f = 0; f < 4; f++) {
+          const leadFinger = fingerRange.open[f] - fingerRange.closed[f];
+          // A lead finger that hardly moved is no yardstick: dividing by it
+          // would make the other hand's finger look worse than it is.
+          if (leadFinger < MIN_FINGER_SPAN) {
+            fingers.push(null);
+            continue;
+          }
+          const movedFinger = Math.max(
+            0,
+            this.spans.high[f] - this.spans.low[f] - NOISE_FLOOR,
+          );
+          fingers.push(Math.round(Math.min(1, movedFinger / leadFinger) * 100) / 100);
+        }
+        context.result.fingers = fingers;
+      }
     }
     return finished;
   }

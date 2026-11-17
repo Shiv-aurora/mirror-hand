@@ -2,7 +2,8 @@ import { VisibilityState, World } from '@iwsdk/core';
 import projectOptions from 'virtual:iwsdk-project';
 import { sound } from './audio.js';
 import { Director } from './director.js';
-import { Store } from './store.js';
+import { Store, type Settings } from './store.js';
+import { planSession } from './tailor.js';
 
 const container = document.getElementById('scene-container') as HTMLDivElement;
 const landing = document.getElementById('landing') as HTMLElement;
@@ -49,6 +50,94 @@ function showHistory(): void {
   section.hidden = false;
 }
 
+/** Say what the next session will be like, and why. */
+function showNext(): void {
+  const text = document.getElementById('next-text') as HTMLElement;
+  const store = new Store();
+  const lead = store.lead;
+  text.classList.remove('caution');
+  if (lead === null) {
+    text.textContent =
+      'Sessions adapt to you after the first two: how long they are, how far you reach, and which finger gets extra practice.';
+    return;
+  }
+  const settings = store.settings;
+  const plan = planSession(store.sessions, lead, settings);
+  if (plan.caution) {
+    text.textContent = plan.caution;
+    text.classList.add('caution');
+  } else if (plan.reasons.length > 0) {
+    text.textContent = `Your next session: ${plan.reasons.join(' ')}`;
+  } else if (!settings.tailor) {
+    text.textContent = 'Your next session is the standard one. Tailoring is switched off.';
+  } else {
+    text.textContent =
+      'Your next session is the standard one. It adapts once there are two sessions to go on.';
+  }
+}
+
+/** Session settings and the clear-history button. */
+function setupSettings(): void {
+  const tailor = document.getElementById('set-tailor') as HTMLInputElement;
+  const gentle = document.getElementById('set-gentle') as HTMLInputElement;
+  const bloom = document.getElementById('set-bloom') as HTMLInputElement;
+  const chimes = document.getElementById('set-chimes') as HTMLInputElement;
+  const reach = document.getElementById('set-reach') as HTMLInputElement;
+  const message = document.getElementById('settings-message') as HTMLElement;
+  const clearButton = document.getElementById('clear-history') as HTMLButtonElement;
+
+  const load = (): void => {
+    const settings = new Store().settings;
+    tailor.checked = settings.tailor;
+    gentle.checked = settings.gentle;
+    bloom.checked = settings.leaveOut.bloom;
+    chimes.checked = settings.leaveOut.chimes;
+    reach.checked = settings.leaveOut.reach;
+  };
+  load();
+
+  const save = (changed: HTMLInputElement): void => {
+    message.textContent = '';
+    if (bloom.checked && chimes.checked && reach.checked && changed !== tailor && changed !== gentle) {
+      changed.checked = false;
+      message.textContent = 'At least one movement stays in.';
+    }
+    const store = new Store();
+    const settings: Settings = {
+      tailor: tailor.checked,
+      gentle: gentle.checked,
+      leaveOut: { bloom: bloom.checked, chimes: chimes.checked, reach: reach.checked },
+    };
+    store.setSettings(settings);
+    showNext();
+  };
+  for (const box of [tailor, gentle, bloom, chimes, reach]) {
+    box.addEventListener('change', () => save(box));
+  }
+
+  let armed: number | null = null;
+  const disarm = (): void => {
+    if (armed !== null) window.clearTimeout(armed);
+    armed = null;
+    clearButton.textContent = 'Clear my history';
+  };
+  clearButton.addEventListener('click', () => {
+    if (armed === null) {
+      clearButton.textContent = 'Press again to clear';
+      armed = window.setTimeout(disarm, 4000);
+      return;
+    }
+    disarm();
+    new Store().clear();
+    showHistory();
+    showNext();
+  });
+}
+
+showHistory();
+showNext();
+setupSettings();
+
 World.create(container, projectOptions)
   .then(async (world) => {
     world.registerSystem(Director);
@@ -85,6 +174,7 @@ World.create(container, projectOptions)
       landing.classList.toggle('hidden', inVR);
       if (!inVR) {
         showHistory();
+        showNext();
         sound.stopDrone();
         return;
       }

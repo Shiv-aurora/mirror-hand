@@ -113,6 +113,14 @@ const reachWrist = (index) => {
 const PINCHES = ['pinch', 'pinch-middle', 'pinch-ring', 'pinch-pinky'];
 const CHIME_ORDER = [0, 1, 2, 3, 3, 2, 1, 0, 0, 1, 2, 3];
 
+/** Wait for "How did that feel?", answer it, and wait for the summary. */
+const answer = (comfort) => [
+  until('(s) => s.phase === "comfort"', 14000),
+  wait(600),
+  ['hook', 'press', comfort],
+  until('(s) => s.phase === "summary"', 4000),
+];
+
 /** One unrecorded earlier session, with the left hand closing by `weight`. */
 const seed = (weight) => [
   ...sitDown,
@@ -137,10 +145,86 @@ const seed = (weight) => [
     pose('left', 'default', 1.0),
     wait(1500),
   ]),
-  until('(s) => s.phase === "summary"', 14000),
+  ...answer('fine'),
   wait(800),
   ['hook', 'press', 'finish'],
   wait(1500),
+];
+
+// ---- whole-session checks -----------------------------------------------------
+const checkA = (reps, order) => [
+  ...sitDown,
+  head(-20, 0, 0.4),
+  ...chooseRight,
+  hand('right', ...WORK, 0.5),
+  wait(2800),
+  hand('right', 0.04, 0.93, -0.38, 0.7),
+  until('(s) => s.activity === 0', 8000),
+  hand('right', ...WORK, 0.6),
+  wait(900),
+  ...repeat(reps, () => [
+    pose('right', 'fist', 0.7),
+    wait(1000),
+    pose('right', 'open', 0.7),
+    wait(1000),
+  ]),
+  until('(s) => s.activity === 1', 6000),
+  wait(1200),
+  ...repeat(order.length, (i) => [
+    pose('right', PINCHES[order[i]], 0.3),
+    wait(650),
+    pose('right', 'open', 0.3),
+    wait(520),
+  ]),
+  until('(s) => s.activity === 2', 6000),
+];
+
+/** The left hand closes each finger by its own amount; the ring finger least. */
+const unevenFist = (duration) => [
+  'xr',
+  'set_hand_pose',
+  {
+    device: 'hand-left',
+    poseId: 'default',
+    fingers: {
+      thumb: { poseId: 'fist', weight: 0.5 },
+      index: { poseId: 'fist', weight: 0.6 },
+      middle: { poseId: 'fist', weight: 0.55 },
+      ring: { poseId: 'fist', weight: 0.12 },
+      pinky: { poseId: 'fist', weight: 0.5 },
+    },
+    duration,
+  },
+];
+
+const checkB = (count, scale) => [
+  ['unlock'],
+  wait(600),
+  ...repeat(count, (i) => {
+    const [out, up, forward] = REACHES[i].map((v) => v * scale);
+    const z = Math.min(-0.22, HOME[2] + forward);
+    const x = Math.min(0.56 * -z, Math.max(0.085, HOME[0] + out));
+    const y = Math.max(WORK_Y - 0.03, HOME[1] + up - 0.04);
+    return [
+      hand('right', x + 0.001, y + 0.001, z + 0.048, 0.8),
+      until(`(s) => s.progress >= ${(i + 1) / count - 0.01} || s.activity !== 2`, 5000),
+      wait(250),
+    ];
+  }),
+  until('(s) => s.activity === 3', 8000),
+  hand('right', ...LAP.right, 0.8),
+  hand('left', -0.15, 0.93, -0.38, 0.9),
+  wait(2200),
+  ...repeat(6, () => [
+    unevenFist(1.0),
+    wait(1400),
+    pose('left', 'default', 1.0),
+    wait(1400),
+  ]),
+  until('(s) => s.phase === "comfort"', 14000),
+  hand('left', ...LAP.left, 0.8),
+  hand('right', ...WORK, 0.8),
+  wait(1200),
 ];
 
 // ---- camera and variation -----------------------------------------------------
@@ -335,7 +419,7 @@ export const SCENES = {
         wait(Math.round(open * 1000 + between(i + 180, 300, 520))),
       ];
     }),
-    until('(s) => s.phase === "summary"', 12000),
+    ...answer('fine'),
     mark('summary'),
     cam({ ...view(EYE, -12), dur: 1.3 }),
     hand('left', ...LAP.left, 0.9),
@@ -381,6 +465,18 @@ export const SCENES = {
     wait(2500),
     mark('end'),
   ],
+
+  // Unrecorded checks of a whole session, in two runs (a run is limited to
+  // under two minutes): `a` goes from sitting down to the end of the finger
+  // touches, `b` from the fireflies to the question at the end, which it
+  // leaves unanswered. `check1` is the standard session; `check3` is the
+  // fuller one with extra ring-finger touches.
+  check1a: checkA(6, CHIME_ORDER),
+  check1b: checkB(8, 1),
+  check3a: checkA(8, [0, 1, 2, 3, 3, 2, 1, 0, 0, 1, 2, 3, 2, 1, 2, 3]),
+  check3b: checkB(8, 1.15),
+  // Sit down, choose the right hand and stop on "The mirror" panel.
+  checkMeet: [...sitDown, head(-20, 0, 0.4), ...chooseRight, hand('right', ...WORK, 0.5), wait(1500)],
 
   trial: [
     ...sitDown,
