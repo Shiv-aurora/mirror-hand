@@ -193,6 +193,7 @@ export class Director extends createSystem({
       home: new Vector3(0.16, 0.9, -0.36),
       range: { open: 0.86, closed: 0.66, learned: false },
       result: { range: null },
+      ripple: (x, z) => this.garden.ripple(x, z),
     };
 
     const padOf = (entity: Entity): PadButton | undefined =>

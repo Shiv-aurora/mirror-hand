@@ -30,6 +30,8 @@ export interface Context {
   range: { open: number; closed: number; learned: boolean };
   /** Filled in by the "your turn" activity. */
   result: { range: number | null };
+  /** Start a ripple on the water under a point given in seat space. */
+  ripple(x: number, z: number): void;
 }
 
 export interface Activity {
@@ -171,6 +173,9 @@ export class BloomActivity implements Activity {
         if (event === 'opened') {
           this.lilies[0].flash();
           this.lilies[1].flash();
+          for (const lily of this.lilies) {
+            context.ripple(lily.group.position.x, lily.group.position.z);
+          }
           context.sound.chord([PENTATONIC[2], PENTATONIC[4], PENTATONIC[6]], 0.3);
         } else {
           this.cycles = Math.floor(this.counter.halfCycles / 2);
@@ -310,6 +315,10 @@ export class ChimesActivity implements Activity {
         this.armed = false;
         this.touching = nearest;
         this.lanterns[nearest].ring();
+        context.ripple(
+          this.lanterns[nearest].group.position.x,
+          this.lanterns[nearest].group.position.z,
+        );
         if (nearest === wanted) {
           context.sound.bell(FINGER_NOTES[nearest], 0.5);
           this.advance(context);
@@ -501,6 +510,7 @@ export class FirefliesActivity implements Activity {
       const firefly = this.caught[this.index * 2 + i];
       firefly.group.position.copy(this.pair[i].group.position);
       firefly.show(true);
+      context.ripple(firefly.group.position.x, firefly.group.position.z);
       this.pair[i].show(false);
       this.pair[i].charge = 0;
     }
@@ -608,6 +618,7 @@ export class TurnActivity implements Activity {
         const event = this.counter.update(other.openness, delta, 0.03);
         if (event === 'opened') {
           this.lily.flash();
+          context.ripple(this.lily.group.position.x, this.lily.group.position.z);
           context.sound.bell(PENTATONIC[5], 0.35);
         }
         const span = Math.max(0.05, this.counter.high - this.counter.low);

@@ -6,10 +6,12 @@ import {
   CircleGeometry,
   Color,
   CylinderGeometry,
+  DoubleSide,
   Group,
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
+  PlaneGeometry,
   Points,
   PointsMaterial,
   RingGeometry,
@@ -278,6 +280,78 @@ function seeded(seed: number): () => number {
   };
 }
 
+const BASIN_Z = -0.6;
+const RIPPLE_COUNT = 8;
+const RIPPLE_SECONDS = 1.8;
+const RIPPLE_GEOMETRY = new RingGeometry(0.94, 1, 48);
+const BASIN_PAD_MATERIAL = new MeshStandardMaterial({
+  color: 0x1f4a3c,
+  roughness: 0.75,
+});
+
+/** A soft streak of broken light, for the moon's reflection on water. */
+function glintTexture(random: () => number): CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 512;
+  const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
+  for (let i = 0; i < 150; i++) {
+    const along = random();
+    const y = along * 512;
+    // Wider and fainter near the viewer, tight and bright near the moon.
+    const half = 4 + 26 * along * random();
+    const alpha = (0.1 + 0.5 * random()) * (1 - along * 0.75) *
+      Math.min(1, along * 12);
+    const gradient = ctx.createLinearGradient(32 - half, 0, 32 + half, 0);
+    gradient.addColorStop(0, 'rgba(255,255,255,0)');
+    gradient.addColorStop(0.5, `rgba(255,255,255,${alpha.toFixed(3)})`);
+    gradient.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(32 - half, y, half * 2, 1.5 + random() * 2.5);
+  }
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  return texture;
+}
+
+/** A ring of low rolling hills at `radius`, as one strip of triangles. */
+function hills(
+  random: () => number,
+  radius: number,
+  height: number,
+  color: Color,
+): Mesh {
+  const segments = 160;
+  const phases = [random() * 6.28, random() * 6.28, random() * 6.28];
+  const positions = new Float32Array((segments + 1) * 2 * 3);
+  const indices: number[] = [];
+  for (let i = 0; i <= segments; i++) {
+    const angle = (i / segments) * Math.PI * 2;
+    const top =
+      height *
+      (0.45 +
+        0.3 * Math.sin(angle * 3 + phases[0]) +
+        0.17 * Math.sin(angle * 7 + phases[1]) +
+        0.08 * Math.sin(angle * 17 + phases[2]));
+    const x = Math.cos(angle) * radius;
+    const z = Math.sin(angle) * radius;
+    positions.set([x, -0.5, z, x, Math.max(0.25, top), z], i * 6);
+    if (i < segments) {
+      const a = i * 2;
+      indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+    }
+  }
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  const mesh = new Mesh(
+    geometry,
+    new MeshBasicMaterial({ color, side: DoubleSide, toneMapped: false }),
+  );
+  mesh.frustumCulled = false;
+  return mesh;
+}
+
 /**
  * The setting: a still pond at night, with a round stone basin in front of
  * the seat that the activities happen on. Built once, in seat space.
@@ -288,6 +362,8 @@ export class Garden {
   readonly basin = new Group();
   private readonly motes: Points;
   private readonly moteBase: Float32Array;
+  private readonly ripples: { ring: Mesh; age: number }[] = [];
+  private nextRipple = 0;
   private clock = 0;
 
   constructor() {
@@ -357,11 +433,91 @@ export class Garden {
       new CircleGeometry(1.5, 40),
       new MeshBasicMaterial({ color: 0xfff1d6, toneMapped: false, fog: false }),
     );
-    moon.position.set(-9, 8.4, -38);
+    moon.position.set(-17, 8.6, -34);
     moon.lookAt(0, 1.2, 0);
     const halo = glowSprite(0xffe2b8, 16, 0.32);
     halo.position.copy(moon.position);
     this.group.add(moon, halo);
+
+    // Moonlight on the water: a broken streak leading towards the moon.
+    const glint = new Mesh(
+      new PlaneGeometry(3.4, 30),
+      new MeshBasicMaterial({
+        map: glintTexture(random),
+        color: 0xffe6c4,
+        transparent: true,
+        opacity: 0.85,
+        blending: AdditiveBlending,
+        depthWrite: false,
+        toneMapped: false,
+      }),
+    );
+    glint.rotation.x = -Math.PI / 2;
+    glint.position.set(0, 0.012, -19);
+    const towardsMoon = new Group();
+    towardsMoon.rotation.y = Math.atan2(-moon.position.x, -moon.position.z);
+    towardsMoon.add(glint);
+    this.group.add(towardsMoon);
+
+    // Two rings of low hills on the horizon, paler with distance.
+    this.group.add(
+      hills(random, 78, 5.2, new Color().setRGB(0.235, 0.16, 0.285, SRGBColorSpace)),
+      hills(random, 58, 3.1, new Color().setRGB(0.165, 0.118, 0.225, SRGBColorSpace)),
+    );
+
+    // Lily pads drifting on the far water.
+    const padGeometry = new CircleGeometry(1, 20, 0.35, Math.PI * 2 - 0.7);
+    const padMaterial = new MeshBasicMaterial({ color: 0x18382f });
+    for (let i = 0; i < 26; i++) {
+      const azimuth = random() * Math.PI * 2;
+      const radius = 1.5 + random() * 7.5;
+      const pad = new Mesh(padGeometry, padMaterial);
+      pad.rotation.set(-Math.PI / 2, 0, random() * Math.PI * 2);
+      pad.scale.setScalar(0.1 + random() * 0.16);
+      pad.position.set(
+        Math.cos(azimuth) * radius,
+        0.01 + i * 0.0004,
+        Math.sin(azimuth) * radius,
+      );
+      this.group.add(pad);
+    }
+
+    // Small pads on the basin itself, clear of where the activities happen.
+    const basinPads: readonly (readonly [number, number, number])[] = [
+      [-0.36, -0.12, 0.05],
+      [0.38, -0.05, 0.042],
+      [-0.3, 0.26, 0.036],
+      [0.27, 0.3, 0.048],
+      [0.02, -0.38, 0.04],
+      [-0.12, -0.33, 0.026],
+    ];
+    for (const [x, z, size] of basinPads) {
+      const pad = new Mesh(padGeometry, BASIN_PAD_MATERIAL);
+      pad.rotation.set(-Math.PI / 2, 0, random() * Math.PI * 2);
+      pad.scale.setScalar(size);
+      pad.position.set(x, 0.003, z);
+      this.basin.add(pad);
+    }
+
+    // Ripples: rings that spread over the basin when something happens.
+    for (let i = 0; i < RIPPLE_COUNT; i++) {
+      const ring = new Mesh(
+        RIPPLE_GEOMETRY,
+        new MeshBasicMaterial({
+          color: 0xbfd0ff,
+          transparent: true,
+          opacity: 0,
+          blending: AdditiveBlending,
+          depthWrite: false,
+          toneMapped: false,
+        }),
+      );
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = 0.005;
+      ring.visible = false;
+      this.basin.add(ring);
+      this.ripples.push({ ring, age: 1 });
+    }
 
     // Stars.
     const starCount = 420;
@@ -426,7 +582,22 @@ export class Garden {
 
   /** Put the basin at the right height and distance for this seat. */
   place(workY: number): void {
-    this.basin.position.set(0, workY - 0.13, -0.48);
+    this.basin.position.set(0, workY - 0.13, BASIN_Z);
+  }
+
+  /** Start a ripple on the basin water under a point given in seat space. */
+  ripple(x: number, z: number): void {
+    const ripple = this.ripples[this.nextRipple];
+    this.nextRipple = (this.nextRipple + 1) % this.ripples.length;
+    // Keep it on the water.
+    const dx = x;
+    const dz = z - BASIN_Z;
+    const distance = Math.hypot(dx, dz);
+    const scale = distance > 0.36 ? 0.36 / distance : 1;
+    ripple.ring.position.x = dx * scale;
+    ripple.ring.position.z = dz * scale;
+    ripple.age = 0;
+    ripple.ring.visible = true;
   }
 
   update(delta: number): void {
@@ -443,5 +614,16 @@ export class Garden {
       );
     }
     position.needsUpdate = true;
+
+    for (const ripple of this.ripples) {
+      if (ripple.age >= 1) {
+        continue;
+      }
+      ripple.age = Math.min(1, ripple.age + delta / RIPPLE_SECONDS);
+      const a = ripple.age;
+      ripple.ring.scale.setScalar(0.02 + 0.13 * (1 - (1 - a) * (1 - a)));
+      (ripple.ring.material as MeshBasicMaterial).opacity = 0.5 * (1 - a) * (1 - a);
+      ripple.ring.visible = a < 1;
+    }
   }
 }

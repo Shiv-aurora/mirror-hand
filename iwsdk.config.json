@@ -43,7 +43,7 @@
   },
   "dev": {
     "emulator": {
-      "device": "metaVRGlasses"
+      "device": "metaQuest3"
     }
   }
 }
