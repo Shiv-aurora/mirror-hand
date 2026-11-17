@@ -14,7 +14,8 @@
  * Rendered with raea 0.1.6 (github.com/shinyobjectz/raea) from a folder that
  * holds this file and media/ (v3/one.mp4, v3/two.mp4, v3/explain.mp4,
  * v3/closing-long.mp4, glasses.mp4, fonts/Inter.ttf, and the narration as one
- * file per line in vo/01.wav to vo/18.wav):
+ * file per line in vo11/level/01.wav to 18.wav, made by narrate.mjs from
+ * narration.json with an ElevenLabs voice, then levelled to -18 LUFS):
  *   raea render edit.tsx -o demo.mp4 --quality master
  */
 import {
@@ -53,9 +54,9 @@ const sec = (s: number) => Math.round(s * FPS);
 const ramp = (f: number, from: number, to: number, easing = OUT) =>
   interpolate(f, [sec(from), sec(to)], [0, 1], { ...clamp, easing });
 /** The recordings are quiet; this lifts all of them by the same amount, with the loudest bell still under the ceiling. */
-const GAIN = 4;
-/** Seconds each narration clip runs (media/vo/durations.json). */
-const VO: Record<string, number> = {"01": 1.74, "02": 1.94, "03": 3.4, "04": 5.54, "05": 6.24, "06": 2.28, "07": 2.89, "08": 4.68, "09": 2.99, "10": 4.69, "11": 1.39, "12": 1.9, "13": 4.86, "14": 3.75, "15": 6.23, "16": 5.28, "17": 4.14, "18": 5.14};
+const GAIN = 3;
+/** Seconds each narration clip runs (media/vo11/durations.json). */
+const VO: Record<string, number> = {"01": 2.03, "02": 2.77, "03": 3.61, "04": 5.27, "05": 6.15, "06": 2.64, "07": 2.64, "08": 5.14, "09": 3.84, "10": 4.51, "11": 1.51, "12": 1.97, "13": 4.91, "14": 3.65, "15": 6.25, "16": 5.52, "17": 4.35, "18": 4.74};
 const VOICE_GAIN = 0;
 
 // ---- data -------------------------------------------------------------------
@@ -464,7 +465,7 @@ export default function Demo() {
       {/* The narration: one clip per line, each starting on its own beat. */}
       {BEATS.flatMap((b, i) => (b.say ?? []).map(([clip, at]) => (
         <Sequence key={clip} from={STARTS[i] + sec(at)} durationInFrames={Math.floor(VO[clip] * FPS)} layout="none" name={`voice ${clip}`}>
-          <Audio src={staticFile(`vo/${clip}.wav`)} startFrom={0} endAt={Math.floor(VO[clip] * FPS)} gainDb={VOICE_GAIN} fadeIn={0.01} fadeOut={0.03} />
+          <Audio src={staticFile(`vo11/level/${clip}.wav`)} startFrom={0} endAt={Math.floor(VO[clip] * FPS)} gainDb={VOICE_GAIN} fadeIn={0.01} fadeOut={0.03} />
         </Sequence>
       )))}
       {/* The app's own sound carries on under the pages that have no footage. */}

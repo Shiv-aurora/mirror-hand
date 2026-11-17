@@ -22,8 +22,9 @@
     "three": "npm:super-three@0.185.0"
   },
   "devDependencies": {
-    "@iwsdk/reference": "1.1.0",
+    "@elevenlabs/elevenlabs-js": "^2.79.0",
     "@iwsdk/cli": "1.1.0",
+    "@iwsdk/reference": "1.1.0",
     "@iwsdk/vite-plugin-dev": "1.1.0",
     "@types/three": "^0.185.0",
     "typescript": "^5.5.0",
