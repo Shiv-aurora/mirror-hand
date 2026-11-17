@@ -1,6 +1,6 @@
 # Mirror Hand
 
-A five-minute daily hand practice for Meta Quest and Meta VR Glasses, inspired
+A three-minute daily hand practice for Meta Quest and Meta VR Glasses, inspired
 by mirror therapy. You move the hand that moves more easily; in the headset,
 your other hand follows it like a reflection. At the end the mirror switches
 off, you try the other hand on its own, and the app records how far it opened

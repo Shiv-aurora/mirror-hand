@@ -228,8 +228,11 @@ export class BloomActivity implements Activity {
 const FINGER_NAMES = ['index', 'middle', 'ring', 'little'] as const;
 const FINGER_TINTS = [0xffd08a, 0xff9fb0, 0x9fd0ff, 0xb6f0a0] as const;
 const FINGER_NOTES = [PENTATONIC[3], PENTATONIC[4], PENTATONIC[5], PENTATONIC[7]];
-const TOUCH_ON = 0.021;
-const TOUCH_OFF = 0.036;
+// Distances are between the tracked fingertip joints, which sit a little
+// inside the finger, so two touching fingertips still read 1–2 cm apart on a
+// real headset.
+const TOUCH_ON = 0.03;
+const TOUCH_OFF = 0.048;
 /** The touching finger must beat the next nearest by this much (metres). */
 const TOUCH_MARGIN = 0.004;
 const TOUCH_SECONDS = 0.08;
@@ -328,7 +331,7 @@ export class ChimesActivity implements Activity {
       }
     }
     // Never leave someone stuck on a touch their hand cannot make.
-    if (this.stall > 16 && this.step < CHIME_ORDER.length) {
+    if (this.stall > 10 && this.step < CHIME_ORDER.length) {
       this.advance(context);
     }
     for (const lantern of this.lanterns) {

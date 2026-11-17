@@ -471,7 +471,7 @@ export class Director extends createSystem({
         gap = Math.min(gap, sign * point.x);
       }
     }
-    const together = gap < 0.012;
+    const together = gap < 0.02;
     this.meetHold =
       together && this.phaseTime > 2.5
         ? this.meetHold + dt
@@ -674,7 +674,7 @@ export class Director extends createSystem({
     // When the lead hand reaches across the middle (to press a button), its
     // reflection would pass through it, so the reflection fades out.
     const leadSign = this.leadSide === 'left' ? -1 : 1;
-    const crossed = mirroring && leadSign * this.context.lead.palm.x < 0.012;
+    const crossed = mirroring && leadSign * this.context.lead.palm.x < 0.004;
     for (const side of SIDES) {
       let state = this.hands[side];
       const reflected = mirroring && side !== this.leadSide;
