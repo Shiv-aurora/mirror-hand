@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, shrink-to-fit=no"
+    />
+    <meta
+      name="description"
+      content="Mirror Hand: a three-minute daily hand practice for Meta Quest, inspired by mirror therapy. Move one hand and watch the other follow. Hands only, seated."
+    />
+    <meta name="theme-color" content="#0b1024" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%230b1024'/%3E%3Ccircle cx='32' cy='32' r='12' fill='%23ffcf8a'/%3E%3C/svg%3E"
+    />
+    <title>Mirror Hand</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --ink: #f6efe6;
+        --soft: rgba(246, 239, 230, 0.74);
+        --faint: rgba(246, 239, 230, 0.52);
+        --accent: #ffcf8a;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #0b1024;
+        color: var(--ink);
+        font-family:
+          Inter, 'SF Pro Text', 'Segoe UI', 'Noto Sans', Roboto,
+          'Helvetica Neue', Arial, sans-serif;
+        overflow: hidden;
+      }
+      #scene-container {
+        position: fixed;
+        inset: 0;
+      }
+      #landing {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: flex-end;
+        justify-content: center;
+        padding: 0 20px 6vh;
+        box-sizing: border-box;
+        background: linear-gradient(
+          to top,
+          rgba(8, 11, 28, 0.94) 0%,
+          rgba(8, 11, 28, 0.6) 46%,
+          rgba(8, 11, 28, 0) 78%
+        );
+        transition: opacity 0.4s ease;
+        pointer-events: none;
+      }
+      #landing.hidden {
+        opacity: 0;
+        visibility: hidden;
+      }
+      .card {
+        max-width: 620px;
+        text-align: center;
+        pointer-events: auto;
+      }
+      .eyebrow {
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--accent);
+        margin: 0 0 10px;
+      }
+      h1 {
+        font-size: clamp(34px, 6vw, 54px);
+        font-weight: 600;
+        letter-spacing: -0.02em;
+        margin: 0 0 12px;
+      }
+      p.lead {
+        font-size: clamp(16px, 2.2vw, 19px);
+        line-height: 1.5;
+        color: var(--soft);
+        margin: 0 0 22px;
+      }
+      button#enter {
+        font: inherit;
+        font-size: 18px;
+        font-weight: 600;
+        color: #1a1408;
+        background: var(--accent);
+        border: 0;
+        border-radius: 999px;
+        padding: 15px 44px;
+        min-width: 200px;
+        cursor: pointer;
+        transition:
+          transform 0.15s ease,
+          opacity 0.15s ease;
+      }
+      button#enter:hover:not(:disabled) {
+        transform: translateY(-1px);
+      }
+      button#enter:focus-visible {
+        outline: 3px solid var(--ink);
+        outline-offset: 3px;
+      }
+      button#enter:disabled {
+        opacity: 0.45;
+        cursor: default;
+      }
+      #status {
+        font-size: 15px;
+        color: var(--soft);
+        margin: 14px 0 0;
+        min-height: 1.4em;
+      }
+      #history {
+        margin: 18px auto 0;
+        max-width: 420px;
+      }
+      #history-bars {
+        display: flex;
+        align-items: flex-end;
+        justify-content: center;
+        gap: 6px;
+        height: 44px;
+        border-bottom: 1px solid rgba(246, 239, 230, 0.16);
+      }
+      #history-bars span {
+        width: 18px;
+        min-height: 3px;
+        border-radius: 5px 5px 0 0;
+        background: rgba(255, 207, 138, 0.42);
+      }
+      #history-bars span:last-child {
+        background: var(--accent);
+      }
+      #history-text {
+        font-size: 14px;
+        color: var(--soft);
+        margin: 8px 0 0;
+      }
+      #next {
+        margin: 14px auto 0;
+        max-width: 480px;
+      }
+      #next-text {
+        font-size: 14px;
+        line-height: 1.45;
+        color: var(--soft);
+        margin: 0;
+      }
+      #next-text.caution {
+        color: var(--accent);
+      }
+      #settings {
+        margin: 12px auto 0;
+        max-width: 420px;
+        text-align: left;
+        font-size: 14px;
+        color: var(--soft);
+      }
+      #settings summary {
+        font-size: 14px;
+        color: var(--faint);
+        cursor: pointer;
+        text-align: center;
+        padding: 8px 12px;
+        min-height: 24px;
+        border-radius: 8px;
+        list-style-position: inside;
+      }
+      #settings summary:focus-visible,
+      #settings label:has(input:focus-visible),
+      #settings button:focus-visible {
+        outline: 3px solid var(--ink);
+        outline-offset: 2px;
+      }
+      #settings .note {
+        font-size: 13px;
+        color: var(--faint);
+        margin: 4px 0 6px;
+      }
+      #settings label {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-height: 40px;
+        cursor: pointer;
+        color: var(--soft);
+        border-radius: 8px;
+      }
+      #settings input[type='checkbox'] {
+        width: 20px;
+        height: 20px;
+        margin: 0;
+        flex: none;
+        accent-color: var(--accent);
+      }
+      #settings fieldset {
+        border: 0;
+        margin: 6px 0 0;
+        padding: 0;
+        min-width: 0;
+      }
+      #settings legend {
+        font-size: 13px;
+        color: var(--faint);
+        padding: 0;
+      }
+      #settings-message {
+        font-size: 13px;
+        color: var(--accent);
+        margin: 4px 0 0;
+        min-height: 1.4em;
+      }
+      #clear-history {
+        font: inherit;
+        font-size: 14px;
+        color: var(--soft);
+        background: transparent;
+        border: 1px solid rgba(246, 239, 230, 0.3);
+        border-radius: 999px;
+        padding: 8px 18px;
+        min-height: 40px;
+        margin-top: 8px;
+        cursor: pointer;
+      }
+      .fine {
+        font-size: 13px;
+        line-height: 1.5;
+        color: var(--faint);
+        margin: 18px auto 0;
+        max-width: 520px;
+      }
+    </style>
+    <script type="module" crossorigin src="./assets/index-GXY70JHT.js"></script>
+  </head>
+  <body>
+    <div id="scene-container"></div>
+    <main id="landing">
+      <div class="card">
+        <p class="eyebrow">A three-minute daily practice</p>
+        <h1>Mirror Hand</h1>
+        <p class="lead">
+          Move the hand that moves more easily. In the headset, your other hand
+          follows it like a reflection. Then try that hand on its own, and see
+          how far it goes today.
+        </p>
+        <button id="enter" type="button" disabled>Loading…</button>
+        <p id="status" role="status" aria-live="polite"></p>
+        <section id="history" aria-label="Your practice so far" hidden>
+          <div id="history-bars" aria-hidden="true"></div>
+          <p id="history-text"></p>
+        </section>
+        <section id="next" aria-label="Your next session">
+          <p id="next-text" aria-live="polite"></p>
+        </section>
+        <details id="settings">
+          <summary>Session settings</summary>
+          <p class="note">For you or your therapist. Saved only in this browser.</p>
+          <label><input type="checkbox" id="set-tailor" />Tailor each session from my last few</label>
+          <label><input type="checkbox" id="set-gentle" />Keep every session short and gentle</label>
+          <fieldset>
+            <legend>Leave out</legend>
+            <label><input type="checkbox" id="set-bloom" />Open and close</label>
+            <label><input type="checkbox" id="set-chimes" />Finger touches</label>
+            <label><input type="checkbox" id="set-reach" />Reach</label>
+          </fieldset>
+          <p id="settings-message" aria-live="polite"></p>
+          <button id="clear-history" type="button">Clear my history</button>
+        </details>
+        <p class="fine">
+          Inspired by mirror therapy. Not a medical device, and not a
+          substitute for care from a clinician. Your progress is stored only
+          in this browser; nothing is uploaded.
+        </p>
+      </div>
+    </main>
+  </body>
+</html>
