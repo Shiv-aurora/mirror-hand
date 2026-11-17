@@ -192,8 +192,16 @@ export class BloomActivity implements Activity {
     }
     this.lilies[0].update(delta);
     this.lilies[1].update(delta);
+    // The last opening counts as soon as the hand is nearly open again,
+    // without waiting for it to start closing a seventh time.
+    const lastOpening =
+      this.counter.halfCycles >= this.target * 2 - 1 &&
+      this.counter.direction === 1 &&
+      this.counter.smoothed >
+        range.open - 0.2 * Math.max(0.08, range.open - range.closed);
     return (
       Math.floor(this.counter.halfCycles / 2) >= this.target ||
+      lastOpening ||
       this.stall > STALL_SECONDS
     );
   }

@@ -268,8 +268,11 @@ export class TextPanel {
     let bx = x + (w - total) / 2;
     ctx.fillStyle = 'rgba(246, 239, 230, 0.14)';
     ctx.fillRect(x, y + h - 2, w, 2);
+    // Scale to the tallest bar (but never zoom in past 40%), so small early
+    // numbers are still readable as a rising or falling line.
+    const top = Math.max(0.4, ...values);
     values.forEach((value, index) => {
-      const barH = Math.max(6, (h - 8) * Math.min(1, Math.max(0, value)));
+      const barH = Math.max(6, (h - 8) * Math.min(1, Math.max(0, value) / top));
       const last = index === values.length - 1;
       roundedRect(ctx, bx, y + h - 2 - barH, barW, barH, Math.min(10, barW / 2));
       ctx.fillStyle = last ? COLORS.accent : 'rgba(255, 207, 138, 0.42)';

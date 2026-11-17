@@ -28,9 +28,11 @@ function showHistory(): void {
     .filter((session) => session.range !== null)
     .map((session) => session.range as number);
   bars.replaceChildren();
-  for (const value of measured.slice(-14)) {
+  const shown = measured.slice(-14);
+  const top = Math.max(0.4, ...shown);
+  for (const value of shown) {
     const bar = document.createElement('span');
-    bar.style.height = `${Math.round(Math.min(1, value) * 100)}%`;
+    bar.style.height = `${Math.round(Math.min(1, value / top) * 100)}%`;
     bars.append(bar);
   }
   bars.hidden = measured.length === 0;
