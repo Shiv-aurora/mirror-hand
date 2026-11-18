@@ -255,6 +255,23 @@ const near = (i, spread = 0.012) => [
   round3(WORK[2] + (rnd(i + 57) - 0.5) * 2 * spread),
 ];
 
+// ---- tailoring, for the video ---------------------------------------------------
+/** Press "Skip" until the given activity is the current one (from "The mirror"). */
+const skipTo = (activity) =>
+  repeat(activity + 1, (i) => [
+    ['hook', 'press', 'skip'],
+    until(`(s) => s.activity === ${i}`, 4000),
+    wait(250),
+  ]);
+/** Where the wrist goes for the index fingertip to rest on the "Fine" button (right hand leading). */
+const ON_FINE = [0.197, 0.846, -0.203];
+const touch = (finger, i) => [
+  pose('right', PINCHES[finger], round3(between(i + 20, 0.27, 0.36))),
+  wait(Math.round(between(i + 40, 620, 760))),
+  pose('right', 'open', round3(between(i + 60, 0.27, 0.34))),
+  wait(Math.round(between(i + 80, 480, 640))),
+];
+
 export const SCENES = {
   seed1: seed(0.2),
   seed2: seed(0.36),
@@ -477,6 +494,95 @@ export const SCENES = {
   check3b: checkB(8, 1.15),
   // Sit down, choose the right hand and stop on "The mirror" panel.
   checkMeet: [...sitDown, head(-20, 0, 0.4), ...chooseRight, hand('right', ...WORK, 0.5), wait(1500)],
+
+  // The question at the end: the last moments of "your turn", then the
+  // right hand rests a fingertip on "Fine". Start with an empty history.
+  question: [
+    ...sitDown,
+    cam({ ...view(EYE, -21), fov: 1.0 }),
+    wait(500),
+    ...chooseRight,
+    hand('right', ...WORK, 0.4),
+    wait(600),
+    ...skipTo(3),
+    hand('right', ...LAP.right, 0.6),
+    hand('left', -0.15, 0.93, -0.38, 0.8),
+    wait(1500),
+    ...repeat(4, (i) => [
+      partFist('left', round3(between(i + 160, 0.38, 0.5)), 1.0),
+      wait(1450),
+      pose('left', 'default', 1.0),
+      wait(1450),
+    ]),
+    ['record'],
+    mark('start'),
+    ...repeat(2, (i) => [
+      partFist('left', round3(between(i + 164, 0.38, 0.5)), 1.0),
+      wait(1450),
+      pose('left', 'default', 1.0),
+      wait(1450),
+    ]),
+    until('(s) => s.phase === "comfort"', 14000),
+    mark('question'),
+    // Wider and lower, so the three answers and their names are in the picture.
+    cam({ ...view(EYE, -27), fov: 1.15, dur: 1.3 }),
+    hand('left', ...LAP.left, 0.9),
+    wait(2600),
+    hand('right', ...ON_FINE, 1.1),
+    mark('reach'),
+    until('(s) => s.phase === "summary"', 4000),
+    ['eval', 'globalThis.__mirrorHand.state().phase === "comfort" && globalThis.__mirrorHand.press("fine")'],
+    mark('summary'),
+    wait(500),
+    hand('right', ...WORK, 0.9),
+    wait(3200),
+    mark('end'),
+  ],
+
+  // The start of a session after one that was painful: "The mirror" panel
+  // carries the caution. Seed the history first (last session painful).
+  less: [
+    ...sitDown,
+    cam({ ...view(EYE, -17), fov: 1.0 }),
+    wait(500),
+    ...chooseRight,
+    hand('right', ...WORK, 0.8),
+    wait(900),
+    ['record'],
+    mark('start'),
+    cam({ ...view([0, 1.17, -0.2], -13), dur: 7, ease: 'out' }),
+    wait(1700),
+    pose('right', 'fist', 0.9),
+    wait(1300),
+    pose('right', 'open', 0.9),
+    wait(1400),
+    hand('right', 0.19, 0.97, -0.42, 1.0),
+    wait(1600),
+    hand('right', ...WORK, 1.0),
+    wait(1600),
+    mark('end'),
+  ],
+
+  // Extra touches for one finger: the end of the finger touches when the
+  // history says the ring finger opened least. Seed the history first.
+  finger: [
+    ...sitDown,
+    cam({ ...view(EYE, -20), fov: 1.0 }),
+    wait(500),
+    ...chooseRight,
+    hand('right', ...WORK, 0.5),
+    wait(700),
+    ...skipTo(1),
+    cam({ ...view([0, 1.13, -0.1], -27), fov: 0.86, dur: 1.2 }),
+    wait(1500),
+    ...repeat(6, (i) => touch([0, 1, 2, 3, 3, 2][i], i)),
+    ['record'],
+    mark('start'),
+    ...repeat(6, (i) => touch([1, 0, 2, 1, 2, 3][i], i + 6)),
+    until('(s) => s.activity === 2', 6000),
+    mark('end'),
+    wait(400),
+  ],
 
   trial: [
     ...sitDown,

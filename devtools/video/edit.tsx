@@ -1,11 +1,12 @@
 /**
  * Mirror Hand: demo video for the Meta VR Start Developer Competition 2026.
- * Third cut, with narration. 1920x1080, 30 fps. Lengths come from the BEATS list below.
+ * Fourth cut, with narration and the tailored sessions. 1920x1080, 30 fps. Lengths come from the BEATS list below.
  *
  * Every moving picture is the app's own footage, recorded in the Immersive
  * Web SDK emulator at 2304x1296 (devtools/record.mjs, scenes "one", "two",
- * "explain" and "glasses"), so the 1920x1080 frame is a window onto it with
- * no enlargement. Camera moves are real moves of the emulated headset.
+ * "explain", "glasses", "question", "less" and "finger"), so the 1920x1080
+ * frame is a window onto it with no enlargement. The two views of the start
+ * page are stills of that page at 3840x2160 (devtools/still.mjs, MH_ZOOM=2). Camera moves are real moves of the emulated headset.
  * In/out points are seconds into those recordings.
  *
  * Drawn here, not filmed: the mirror-box diagram, the words, the step rail
@@ -13,8 +14,9 @@
  *
  * Rendered with raea 0.1.6 (github.com/shinyobjectz/raea) from a folder that
  * holds this file and media/ (v3/one.mp4, v3/two.mp4, v3/explain.mp4,
- * v3/closing-long.mp4, glasses.mp4, fonts/Inter.ttf, and the narration as one
- * file per line in vo11/level/01.wav to 18.wav, made by narrate.mjs from
+ * v3/closing-long.mp4, v4/question.mp4, v4/less.mp4, v4/finger.mp4,
+ * glasses.mp4, stills/next4k.png, stills/settings4k.png, fonts/Inter.ttf, and
+ * the narration as one file per line in vo12/level/01.wav to 24.wav, made by narrate.mjs from
  * narration.json with an ElevenLabs voice, then levelled to -18 LUFS):
  *   raea render edit.tsx -o demo.mp4 --quality master
  */
@@ -23,6 +25,7 @@ import {
   Audio,
   Composition,
   Easing,
+  Img,
   Sequence,
   Video,
   interpolate,
@@ -55,8 +58,8 @@ const ramp = (f: number, from: number, to: number, easing = OUT) =>
   interpolate(f, [sec(from), sec(to)], [0, 1], { ...clamp, easing });
 /** The recordings are quiet; this lifts all of them by the same amount, with the loudest bell still under the ceiling. */
 const GAIN = 3;
-/** Seconds each narration clip runs (media/vo11/durations.json). */
-const VO: Record<string, number> = {"01": 2.03, "02": 2.77, "03": 3.61, "04": 5.27, "05": 6.15, "06": 2.64, "07": 2.64, "08": 5.14, "09": 3.84, "10": 4.51, "11": 1.51, "12": 1.97, "13": 4.91, "14": 3.65, "15": 6.25, "16": 5.52, "17": 4.35, "18": 4.74};
+/** Seconds each narration clip runs (media/vo12/durations.json). */
+const VO: Record<string, number> = {"01": 2.03, "02": 2.77, "03": 3.61, "04": 5.27, "05": 6.15, "06": 2.64, "07": 2.64, "08": 5.14, "09": 3.84, "10": 4.51, "11": 1.51, "12": 1.97, "13": 2.93, "14": 4.91, "15": 3.61, "16": 3.95, "17": 3.71, "18": 2.85, "19": 5.57, "20": 3.65, "21": 6.25, "22": 5.52, "23": 4.35, "24": 4.74};
 const VOICE_GAIN = 0;
 
 // ---- data -------------------------------------------------------------------
@@ -65,6 +68,9 @@ const TWO = staticFile("v3/two.mp4");
 const EXPLAIN = staticFile("v3/explain.mp4");
 const CLOSING = staticFile("v3/closing-long.mp4");
 const GLASSES = staticFile("glasses.mp4");
+const QUESTION = staticFile("v4/question.mp4");
+const LESS = staticFile("v4/less.mp4");
+const FINGER = staticFile("v4/finger.mp4");
 
 /** A window onto the 2304x1296 recording: its top-left corner in recording pixels, and the zoom (1 is pixel for pixel). */
 interface Win { x: number; y: number; zoom: number }
@@ -100,6 +106,27 @@ function Shot({ src, from, dur, win = SEAT, to, moveAt = 0, moveFor = 1, gainDb 
   );
 }
 
+/** A 3840x2160 still of the start page, shown through a window that can move once. */
+function Still({ name, win, to, moveAt = 0, moveFor = 1 }: { name: string; win: Win; to?: Win; moveAt?: number; moveFor?: number }) {
+  const f = useCurrentFrame();
+  const k = to ? ramp(f, moveAt, moveAt + moveFor, INOUT) : 0;
+  const x = win.x + ((to?.x ?? win.x) - win.x) * k;
+  const y = win.y + ((to?.y ?? win.y) - win.y) * k;
+  const zoom = win.zoom + ((to?.zoom ?? win.zoom) - win.zoom) * k;
+  return (
+    <AbsoluteFill style={{ overflow: "hidden", backgroundColor: NIGHT }}>
+      <Img src={staticFile(`stills/${name}.png`)} style={{ position: "absolute", left: -x * zoom, top: -y * zoom, width: 3840 * zoom, height: 2160 * zoom }} />
+    </AbsoluteFill>
+  );
+}
+
+/** A thin frame around something on the picture. */
+function Ring({ x, y, w, h, at }: { x: number; y: number; w: number; h: number; at: number }) {
+  const f = useCurrentFrame();
+  const k = ramp(f, at, at + 0.5);
+  return <div style={{ position: "absolute", left: x, top: y, width: w, height: h, boxSizing: "border-box", border: `3px solid ${ACCENT}`, borderRadius: 14, opacity: k }} />;
+}
+
 /** One block of words: it rises in, and leaves when the next one is due. */
 function Words({ line, size }: { line: Line; size: number }) {
   const f = useCurrentFrame();
@@ -125,24 +152,24 @@ function Words({ line, size }: { line: Line; size: number }) {
 }
 
 /** The words for a shot, in the left column, over a shade so they read on the water. */
-function Column({ lines, top = 250, shade = 1 }: { lines: Line[]; top?: number; shade?: number }) {
+function Column({ lines, top = 250, shade = 1, width = 560 }: { lines: Line[]; top?: number; shade?: number; width?: number }) {
   return (
     <AbsoluteFill>
       <div style={{ position: "absolute", left: 0, top: 0, width: 760, height: H, background: `linear-gradient(90deg, rgba(10,8,26,${0.62 * shade}) 0%, rgba(10,8,26,${0.45 * shade}) 60%, rgba(10,8,26,0) 100%)` }} />
-      <div style={{ position: "absolute", left: 84, top, width: 560, display: "flex", flexDirection: "column" }}>
+      <div style={{ position: "absolute", left: 84, top, width, display: "flex", flexDirection: "column" }}>
         {lines.map((l, i) => <Words key={i} line={l} size={62} />)}
       </div>
     </AbsoluteFill>
   );
 }
 
-/** Where we are in the session: six short bars, the current one filling as its shot plays. */
-const STEPS = 6;
+/** Where we are in the session: seven short bars, the current one filling as its shot plays. */
+const STEPS = 7;
 function Rail({ step, dur }: { step: number; dur: number }) {
   const f = useCurrentFrame();
   const fill = interpolate(f, [0, dur], [0, 1], clamp);
   const show = interpolate(f, [0, 8], [0, 1], { ...clamp, easing: OUT });
-  const bar = 70;
+  const bar = 60;
   const gap = 8;
   return (
     <div style={{ position: "absolute", left: 84, top: 178, height: 40, display: "flex", alignItems: "center", opacity: step === 1 ? show : 1 }}>
@@ -237,7 +264,7 @@ function Why() {
     { text: "After a stroke, one hand often moves far less than the other.", at: 0.3, until: 4.1 },
     { text: "Mirror therapy hides that hand behind a mirror.", at: 4.3 },
     { text: "The stronger hand's reflection appears in its place.", at: 7.4 },
-    { text: "Thieme et al., Cochrane Review, 2018: 62 trials, moderate-quality evidence that it improves movement after stroke.", at: 10.3, kind: "note" },
+    { text: "Cochrane Review, 2018: 62 trials, moderate-quality evidence that it improves movement after stroke.", at: 10.3, kind: "note" },
   ];
   return (
     <AbsoluteFill style={{ backgroundColor: NIGHT }}>
@@ -412,19 +439,68 @@ const BEATS: Beat[] = [
       <Rail step={5} dur={d} />
     </>
   ) },
-  { id: "summary", dur: 6.8, say: [["13", 0.4]], node: (d) => (
+  { id: "question", dur: 4.8, say: [["13", 0.5]], node: (d) => (
+    <>
+      <Shot src={QUESTION} from={6.6} dur={d} />
+      <Column lines={[
+        { text: "Then one question: how did that feel?", at: 0.3 },
+        { text: "The answer shapes the next session.", at: 2.0, kind: "note" },
+      ]} />
+      <Rail step={6} dur={d} />
+    </>
+  ) },
+  { id: "summary", dur: 6.8, say: [["14", 0.4]], node: (d) => (
     <>
       <Shot src={TWO} from={34.2} dur={d} win={{ x: 0, y: 150, zoom: 1 }} />
       <Column lines={[
         { text: "How far it opened, against your own stronger hand.", at: 0.3 },
         { text: "Kept on the device only. The earlier sessions shown were also emulator runs.", at: 2.2, kind: "note" },
       ]} />
-      <Rail step={6} dur={d} />
+      <Rail step={7} dur={d} />
+    </>
+  ) },
+
+  // Tailoring: what the next session is made of, and why.
+  { id: "plan", dur: 9.0, say: [["15", 0.4], ["16", 4.5]], node: () => (
+    <>
+      <Still name="next4k" win={{ x: 170, y: 650, zoom: 0.72 }} to={{ x: 785, y: 1185, zoom: 1.11 }} moveAt={3.4} moveFor={2.2} />
+      <Ring x={707} y={446} w={1102} h={121} at={5.7} />
+      <Column lines={[
+        { text: "Each session is planned from your last few.", at: 0.3 },
+        { text: "After two good days, a little more. The start page says why. Example history, from emulator runs.", at: 3.2, kind: "note" },
+      ]} />
+    </>
+  ) },
+  { id: "less", dur: 5.0, say: [["17", 0.4]], node: (d) => (
+    <>
+      <Shot src={LESS} from={0.4} dur={d} win={{ x: 0, y: 216, zoom: 1 }} />
+      <Column width={500} lines={[
+        { text: "After pain, the next one is shorter and nearer.", at: 0.3 },
+        { text: "It also says to check with a clinician before carrying on.", at: 1.6, kind: "note" },
+      ]} />
+    </>
+  ) },
+  { id: "finger", dur: 4.0, say: [["18", 0.4]], node: (d) => (
+    <>
+      <Shot src={FINGER} from={1.9} dur={d} win={{ x: 0, y: 0, zoom: 1 }} />
+      <Column width={400} lines={[
+        { text: "Extra touches for the finger that opened least.", at: 0.3 },
+        { text: "Here, the ring finger.", at: 2.3, kind: "note" },
+      ]} />
+    </>
+  ) },
+  { id: "rules", dur: 6.6, say: [["19", 0.4]], node: () => (
+    <>
+      <Still name="settings4k" win={{ x: 550, y: 780, zoom: 0.92 }} to={{ x: 590, y: 810, zoom: 0.96 }} moveAt={0.2} moveFor={6.2} />
+      <Column lines={[
+        { text: "Plain rules on the headset. Nothing is uploaded.", at: 0.3 },
+        { text: "Guided by rehabilitation research. Not yet tested with patients. Can be switched off.", at: 2.4, kind: "note" },
+      ]} />
     </>
   ) },
 
   // How it works: seen as the person sees it, then from the side.
-  { id: "how", dur: 13.6, say: [["14", 0.5], ["15", 5.3]], node: (d) => (
+  { id: "how", dur: 13.6, say: [["20", 0.5], ["21", 5.3]], node: (d) => (
     <>
       <Shot src={EXPLAIN} from={0.7} dur={d} to={{ x: 0, y: 50, zoom: 0.9 }} moveAt={3.65} moveFor={3.2} />
       <Column lines={[
@@ -436,7 +512,7 @@ const BEATS: Beat[] = [
   ) },
 
   // The narrower device.
-  { id: "glasses", dur: 8.2, say: [["16", 0.4]], node: (d) => (
+  { id: "glasses", dur: 8.2, say: [["22", 0.4]], node: (d) => (
     <>
       <GlassesView from={2.3} dur={d} />
       <Column top={300} shade={0} lines={[
@@ -445,7 +521,7 @@ const BEATS: Beat[] = [
       ]} />
     </>
   ) },
-  { id: "end", dur: 11.0, say: [["17", 0.6], ["18", 5.2]], node: (d) => <End dur={d} /> },
+  { id: "end", dur: 11.0, say: [["23", 0.6], ["24", 5.2]], node: (d) => <End dur={d} /> },
 ];
 
 const STARTS = BEATS.reduce<number[]>((acc, b, i) => [...acc, i === 0 ? 0 : acc[i - 1] + sec(BEATS[i - 1].dur)], []);
@@ -465,7 +541,7 @@ export default function Demo() {
       {/* The narration: one clip per line, each starting on its own beat. */}
       {BEATS.flatMap((b, i) => (b.say ?? []).map(([clip, at]) => (
         <Sequence key={clip} from={STARTS[i] + sec(at)} durationInFrames={Math.floor(VO[clip] * FPS)} layout="none" name={`voice ${clip}`}>
-          <Audio src={staticFile(`vo11/level/${clip}.wav`)} startFrom={0} endAt={Math.floor(VO[clip] * FPS)} gainDb={VOICE_GAIN} fadeIn={0.01} fadeOut={0.03} />
+          <Audio src={staticFile(`vo12/level/${clip}.wav`)} startFrom={0} endAt={Math.floor(VO[clip] * FPS)} gainDb={VOICE_GAIN} fadeIn={0.01} fadeOut={0.03} />
         </Sequence>
       )))}
       {/* The app's own sound carries on under the pages that have no footage. */}
@@ -473,6 +549,13 @@ export default function Demo() {
         <Audio src={ONE} startFrom={sec(20.4)} endAt={sec(20.4 + WHY_AND_TITLE)} gainDb={GAIN - 4} fadeIn={0.05} fadeOut={0.3} />
       </Sequence>
       {/* The landing page is silent in the app, so the end page borrows the garden's sound from the first exercise. */}
+      {/* The start page is silent too; the same sound runs under its two stills. */}
+      <Sequence from={startOf("plan")} durationInFrames={sec(9.0)} layout="none" name="sound under the plan page">
+        <Audio src={ONE} startFrom={sec(22.0)} endAt={sec(31.0)} gainDb={GAIN - 5} fadeIn={0.3} fadeOut={0.3} />
+      </Sequence>
+      <Sequence from={startOf("rules")} durationInFrames={sec(6.6)} layout="none" name="sound under the rules page">
+        <Audio src={ONE} startFrom={sec(24.0)} endAt={sec(30.6)} gainDb={GAIN - 5} fadeIn={0.3} fadeOut={0.3} />
+      </Sequence>
       <Sequence from={startOf("end")} durationInFrames={sec(11.0)} layout="none" name="sound under the end page">
         <Audio src={ONE} startFrom={sec(22.0)} endAt={sec(33.0)} gainDb={GAIN - 5} fadeIn={0.3} fadeOut={1.5} />
       </Sequence>
